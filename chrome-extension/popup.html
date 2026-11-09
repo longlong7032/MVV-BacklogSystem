@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <title>Báo lỗi</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="head">
+    <div>
+      <h1>Báo lỗi</h1>
+      <p id="pageTitle" class="muted truncate"></p>
+    </div>
+    <a id="openBacklog" href="#" target="_blank" class="link small">Mở backlog ↗</a>
+  </header>
+
+  <form id="form" novalidate>
+    <div class="field">
+      <label for="project">Dự án</label>
+      <select id="project" required>
+        <option value="">Đang tải...</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="locationUrl">Vị trí (URL)</label>
+      <input id="locationUrl" autocomplete="off">
+    </div>
+
+    <div class="field">
+      <label for="bugText">Mô tả lỗi</label>
+      <textarea id="bugText" rows="4" placeholder="Các bước tái hiện, lỗi gặp phải..."></textarea>
+      <div class="images" id="bugImages"></div>
+      <div class="row small muted">
+        <button type="button" id="pickImage" class="btn-ghost">+ Thêm ảnh</button>
+        <span>hoặc dán ảnh (Ctrl/⌘+V)</span>
+        <input type="file" id="fileInput" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="expectedText">Kết quả mong muốn</label>
+      <textarea id="expectedText" rows="2"></textarea>
+    </div>
+
+    <fieldset class="box">
+      <legend>Đính kèm</legend>
+      <label class="check">
+        <input type="checkbox" id="withScreenshot" checked>
+        <span>Ảnh chụp màn hình trang hiện tại</span>
+      </label>
+      <img id="screenshotPreview" class="shot" alt="" hidden>
+
+      <div class="har">
+        <span class="har-title">File HAR (log mạng)</span>
+        <label class="check"><input type="radio" name="har" value="1"> <span>Gửi kèm HAR</span></label>
+        <label class="check"><input type="radio" name="har" value="0"> <span>Không gửi HAR</span></label>
+        <div id="harOptions" class="har-options">
+          <p id="harStatus" class="small muted"></p>
+          <label class="check small">
+            <input type="checkbox" id="redact" checked>
+            <span>Ẩn cookie / Authorization / token trong HAR</span>
+          </label>
+          <button type="button" id="clearLog" class="btn-ghost small">Xoá log mạng đã ghi của tab này</button>
+        </div>
+      </div>
+    </fieldset>
+
+    <p id="error" class="error" hidden></p>
+    <div id="success" class="success" hidden></div>
+
+    <div class="actions">
+      <button type="submit" id="submit" class="btn-primary">Gửi báo lỗi</button>
+    </div>
+  </form>
+
+  <details class="settings">
+    <summary>Cài đặt</summary>
+    <div class="field">
+      <label for="serverUrl">Địa chỉ Feedback backlog</label>
+      <div class="row">
+        <input id="serverUrl" placeholder="http://localhost:3000">
+        <button type="button" id="saveServer" class="btn-ghost">Lưu</button>
+      </div>
+    </div>
+    <p class="small muted">Phím tắt mở form: Alt+Shift+B (đổi tại chrome://extensions/shortcuts).</p>
+  </details>
+
+  <script src="popup.js"></script>
+</body>
+</html>
