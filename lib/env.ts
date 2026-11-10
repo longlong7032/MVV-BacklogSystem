@@ -2,11 +2,11 @@
 // ENV_FILE: chỉ định file cấu hình khác (vd khi chạy thử, để không nạp .env thật).
 // Phải được import đầu tiên (ES module chạy import theo thứ tự) để các module sau đọc được biến môi trường.
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { ROOT_DIR } from './paths.js';
 
-const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 try {
-  process.loadEnvFile(process.env.ENV_FILE || path.join(root, '.env'));
+  process.loadEnvFile(process.env.ENV_FILE || path.join(ROOT_DIR, '.env'));
 } catch (e) {
-  if (e.code !== 'ENOENT') console.warn('Không đọc được .env:', e.message);
+  // Không có file .env là bình thường (vd trên Vercel dùng biến môi trường của dự án) -> bỏ qua im lặng
+  if ((e as NodeJS.ErrnoException).code !== 'ENOENT') console.warn('Không đọc được .env:', (e as Error).message);
 }

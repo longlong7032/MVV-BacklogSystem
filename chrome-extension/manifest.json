@@ -5,7 +5,7 @@
   "description": "Mở form báo lỗi ngay trên trang đang test, tự chụp màn hình và gửi kèm file HAR (tuỳ chọn) lên Feedback backlog.",
   "permissions": ["storage", "tabs", "activeTab", "webRequest"],
   "host_permissions": ["<all_urls>"],
-  "background": { "service_worker": "background.js" },
+  "background": { "service_worker": "background.js", "type": "module" },
   "devtools_page": "devtools.html",
   "action": {
     "default_title": "Báo lỗi (Alt+Shift+B)",

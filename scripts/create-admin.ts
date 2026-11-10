@@ -8,26 +8,32 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { newToken, hashToken, tokenHint } from '../lib/tokens.js';
+import { ROOT_DIR } from '../lib/paths.js';
+import type { Database, User } from '../shared/types.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+/** File dữ liệu local mà script đọc/ghi trực tiếp (không đi qua server). */
+const DB_FILE = path.join(ROOT_DIR, 'data', 'db.json');
 
-const DB_FILE = path.join(__dirname, '..', 'data', 'db.json');
+// Tham số dòng lệnh: <họ tên> <email>
 const [name, emailArg] = process.argv.slice(2);
-const email = String(emailArg || '').trim().toLowerCase();
+const email = String(emailArg || '')
+  .trim()
+  .toLowerCase();
 
+// Kiểm tra đầu vào: cần có tên và email đúng định dạng
 if (!name || !name.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
   console.error('Cách dùng: npm run create-admin -- "Họ tên" email@congty.vn');
   process.exit(1);
 }
 
-let db = {};
+// Đọc dữ liệu hiện có; chưa có file (lần đầu) thì bắt đầu từ dữ liệu rỗng
+let db: Partial<Database> & { users: User[] } = { users: [] };
 try {
   db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
 } catch (e) {
-  if (e.code !== 'ENOENT') {
-    console.error('Không đọc được data/db.json:', e.message);
+  if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+    console.error('Không đọc được data/db.json:', (e as Error).message);
     process.exit(1);
   }
 }
@@ -35,10 +41,22 @@ db.users = Array.isArray(db.users) ? db.users : [];
 
 const now = new Date().toISOString();
 const token = newToken();
-let user = db.users.find((u) => u.email === email);
+// Email đã có -> nâng quyền + cấp lại token; chưa có -> tạo người dùng mới
+let user: User | undefined = db.users.find((u) => u.email === email);
 const existed = Boolean(user);
 if (!user) {
-  user = { id: crypto.randomUUID(), name: name.trim().slice(0, 120), email, teamId: '', createdAt: now };
+  user = {
+    id: crypto.randomUUID(),
+    name: name.trim().slice(0, 120),
+    email,
+    role: 'admin',
+    active: true,
+    teamId: '',
+    tokenHash: '',
+    tokenHint: '',
+    createdAt: now,
+    updatedAt: now,
+  };
   db.users.push(user);
 }
 Object.assign(user, {
@@ -51,6 +69,7 @@ Object.assign(user, {
   updatedAt: now,
 });
 
+// Ghi an toàn: ghi file tạm rồi đổi tên
 fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
 fs.writeFileSync(DB_FILE + '.tmp', JSON.stringify(db, null, 2));
 fs.renameSync(DB_FILE + '.tmp', DB_FILE);

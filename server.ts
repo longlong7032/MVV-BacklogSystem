@@ -1,5 +1,17 @@
-import './lib/env.js';
+/**
+ * Feedback backlog — máy chủ Express (API + MCP + trang CSR).
+ *
+ * Các phần chính (theo thứ tự trong file):
+ *  1. Cấu hình Express, view engine, file tĩnh.
+ *  2. Mô hình dữ liệu + `migrate` (chuẩn hóa dữ liệu cũ) + khởi tạo lưu trữ.
+ *  3. Upload ảnh / HAR (multer) và API: dự án, team, backlog, xuất Excel.
+ *  4. Bảo mật: giới hạn tốc độ, đăng nhập quản trị, người dùng + token cá nhân.
+ *  5. MCP (Streamable HTTP) cho Claude Code / Cursor.
+ *  6. Trang chủ, xử lý lỗi và khởi động (chạy trực tiếp hoặc export `app` cho Vercel).
+ */
+import './lib/env.js'; // phải import đầu tiên để nạp .env trước khi các module khác đọc biến môi trường
 import express from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import hbs from 'hbs';
 import multer from 'multer';
 import path from 'node:path';
@@ -13,22 +25,63 @@ import { TOKEN_PREFIX, newToken, sha256, hashToken, tokenHint, hashPassword, ver
 import { createMcpServer } from './mcp/server.js';
 import { compressImage } from './lib/image.js';
 import { createStore, runInRequestStore, readDb, writeDb, isLocked, queueUpload, queueFileDelete } from './lib/store.js';
+import { ROOT_DIR } from './lib/paths.js';
+import type { Backend } from './mcp/server.js';
+import type { AuditEntry, Database, Feedback, FeedbackStatus, McpInfo, Project, PublicUser, Role, Team, User } from './shared/types.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { version } = createRequire(import.meta.url)('./package.json');
+/* ---------- Kiểu dữ liệu nội bộ ---------- */
+
+/** Kết quả kiểm tra dữ liệu đầu vào không hợp lệ. */
+interface ValidationError {
+  error: string;
+}
+
+/** Các file multer nhận được, nhóm theo tên field của form. */
+type UploadedFiles = Record<string, Express.Multer.File[]>;
+
+/** Quản trị viên đang thực hiện request (gắn vào `req.admin` sau khi qua `requireAdmin`). */
+interface AdminActor {
+  id: string;
+  name: string;
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      admin?: AdminActor;
+    }
+  }
+}
+
+/** Bộ giới hạn tốc độ cửa sổ cố định, lưu trong bộ nhớ. */
+interface Limiter {
+  /** Ghi nhận 1 lần gọi; trả về số giây phải chờ nếu vượt giới hạn, ngược lại 0. */
+  hit(key: string): number;
+  /** Chỉ kiểm tra (không ghi nhận); trả về số giây còn bị khóa, hoặc 0. */
+  over(key: string): number;
+}
+
+// package.json nằm ở thư mục gốc dự án (ROOT_DIR đúng cả khi chạy từ nguồn lẫn từ dist/)
+const { version } = createRequire(import.meta.url)(path.join(ROOT_DIR, 'package.json')) as { version: string };
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // DATA_DIR / UPLOAD_DIR: đổi nơi lưu dữ liệu và ảnh (dùng khi deploy hoặc chạy thử mà không đụng dữ liệu thật)
-const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
-const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(__dirname, 'uploads');
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(ROOT_DIR, 'data');
+const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(ROOT_DIR, 'uploads');
 
 /* ---------- View engine ---------- */
 // Số proxy tin cậy phía trước app (nginx = 1). Không có proxy thì đặt TRUST_PROXY=0 để IP không bị giả mạo qua X-Forwarded-For.
-const trustProxy = process.env.TRUST_PROXY === undefined ? 1 : /^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY;
+const trustProxy: number | string =
+  process.env.TRUST_PROXY === undefined
+    ? 1
+    : /^\d+$/.test(process.env.TRUST_PROXY)
+      ? Number(process.env.TRUST_PROXY)
+      : process.env.TRUST_PROXY;
 app.set('trust proxy', trustProxy);
 app.disable('x-powered-by');
+// Header bảo mật cơ bản cho mọi phản hồi
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -36,43 +89,62 @@ app.use((req, res, next) => {
   next();
 });
 app.set('view engine', 'hbs');
-app.set('views', path.join(__dirname, 'views'));
+app.set('views', path.join(ROOT_DIR, 'views'));
 
 /* ---------- Static ---------- */
-app.use('/public', express.static(path.join(__dirname, 'public'), { maxAge: '10m' }));
+app.use('/public', express.static(path.join(ROOT_DIR, 'public'), { maxAge: '10m' }));
 app.use(express.json({ limit: '256kb' }));
 
 /* ---------- Helpers ---------- */
-const STATUSES = ['todo', 'doing', 'done']; // Chưa làm / Đang làm / Đã hoàn thành
+/** Các trạng thái hợp lệ: Chưa làm / Đang làm / Đã hoàn thành. */
+const STATUSES: FeedbackStatus[] = ['todo', 'doing', 'done'];
+/** Type guard: chuỗi có phải trạng thái hợp lệ không. */
+const isStatus = (v: string): v is FeedbackStatus => (STATUSES as string[]).includes(v);
 
-const str = (v) => (typeof v === 'string' ? v.trim() : '');
-const now = () => new Date().toISOString();
-const sameName = (a, b) => a.localeCompare(b, 'vi', { sensitivity: 'base' }) === 0;
+/** Ép giá trị bất kỳ về chuỗi đã cắt khoảng trắng; không phải chuỗi -> ''. */
+const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+/** Thời điểm hiện tại dạng ISO-8601. */
+const now = (): string => new Date().toISOString();
+/** So sánh hai tên không phân biệt hoa/thường và dấu (theo locale tiếng Việt). */
+const sameName = (a: string, b: string): boolean => a.localeCompare(b, 'vi', { sensitivity: 'base' }) === 0;
 
-function newTeam(name, lead = '', description = '') {
+/** Tạo bản ghi team mới với id ngẫu nhiên. */
+function newTeam(name: string, lead = '', description = ''): Team {
   return { id: crypto.randomUUID(), name, lead, description, createdAt: now(), updatedAt: now() };
 }
 
-function newProject(name, description = '', code = '') {
+/** Tạo bản ghi dự án mới với id ngẫu nhiên. */
+function newProject(name: string, description = '', code = ''): Project {
   return { id: crypto.randomUUID(), code, name, description, createdAt: now(), updatedAt: now() };
 }
 
 /* ---------- Mini DB (JSON file) ---------- */
-// Chuẩn hóa dữ liệu cũ: feedback lưu tên dự án (project) -> tạo bản ghi dự án và gắn projectId; thêm trạng thái.
-function migrate(db) {
+/**
+ * Chuẩn hóa dữ liệu đọc từ DB (có thể là bản cũ hoặc rỗng): đảm bảo đủ các mảng/trường,
+ * feedback cũ lưu tên dự án (`project`) -> tạo bản ghi dự án và gắn `projectId`, thêm trạng thái mặc định.
+ * Dữ liệu thô chưa được tin cậy nên tham số dùng `any`; kết quả trả về là `Database` đã hợp lệ.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function migrate(raw: Record<string, any>): Database {
+  const db = raw as any;
+  // 1) Bảo đảm đủ các mảng/đối tượng gốc
   db.projects = Array.isArray(db.projects) ? db.projects : [];
   db.teams = Array.isArray(db.teams) ? db.teams : [];
   db.users = Array.isArray(db.users) ? db.users : [];
   db.audit = Array.isArray(db.audit) ? db.audit : [];
   db.sessions = db.sessions && typeof db.sessions === 'object' && !Array.isArray(db.sessions) ? db.sessions : {};
-  for (const u of db.users) if (u.teamId && !db.teams.some((t) => t.id === u.teamId)) u.teamId = '';
+  // 2) Người dùng trỏ tới team đã bị xóa -> bỏ liên kết
+  for (const u of db.users) if (u.teamId && !db.teams.some((t: Team) => t.id === u.teamId)) u.teamId = '';
   db.feedbacks = Array.isArray(db.feedbacks) ? db.feedbacks : [];
+  // 3) Dự án cũ chưa có mã -> mã rỗng
   for (const p of db.projects) if (typeof p.code !== 'string') p.code = '';
 
+  // 4) Chuẩn hóa từng backlog
   for (const f of db.feedbacks) {
-    if (!f.projectId || !db.projects.some((p) => p.id === f.projectId)) {
+    // Backlog cũ lưu tên dự án (f.project): tìm hoặc tạo dự án tương ứng rồi gắn projectId
+    if (!f.projectId || !db.projects.some((p: Project) => p.id === f.projectId)) {
       const name = str(f.project) || 'Chưa phân loại';
-      let project = db.projects.find((p) => sameName(p.name, name));
+      let project = db.projects.find((p: Project) => sameName(p.name, name));
       if (!project) {
         project = newProject(name);
         db.projects.push(project);
@@ -80,20 +152,21 @@ function migrate(db) {
       f.projectId = project.id;
     }
     delete f.project;
+    // Trạng thái, HAR, chuỗi văn bản và team phải luôn hợp lệ
     if (!STATUSES.includes(f.status)) f.status = 'todo';
     if (!f.har) f.har = null;
     for (const k of ['title', 'type', 'note']) if (typeof f[k] !== 'string') f[k] = '';
-    if (!f.teamId || !db.teams.some((t) => t.id === f.teamId)) f.teamId = '';
+    if (!f.teamId || !db.teams.some((t: Team) => t.id === f.teamId)) f.teamId = '';
   }
-  return db;
+  return db as Database;
 }
 
 /* ---------- Lưu trữ: Postgres (có biến DATABASE_URL / POSTGRES_URL...) hoặc file JSON (local) ---------- */
 const storage = createStore({ migrate, dataDir: DATA_DIR, uploadDir: UPLOAD_DIR });
 
 // Khởi tạo (tạo bảng + admin cứng) một lần cho mỗi instance; lỗi thì cho thử lại ở request sau
-let readyPromise = null;
-const ensureReady = () =>
+let readyPromise: Promise<void> | null = null;
+const ensureReady = (): Promise<void> =>
   (readyPromise ||= (async () => {
     await storage.init();
     await storage.withStore(true, seedAdmin);
@@ -102,10 +175,11 @@ const ensureReady = () =>
     throw e;
   }));
 
+// Mọi request chạm tới dữ liệu phải chờ khởi tạo xong (tạo bảng + admin cứng)
 app.use(['/api', '/mcp', '/uploads'], (req, res, next) => {
   ensureReady().then(
     () => next(),
-    (e) => {
+    (e: Error) => {
       console.error('[db] khởi tạo thất bại:', e.message);
       res.status(503).json({ error: 'Không khởi tạo được cơ sở dữ liệu, vui lòng thử lại sau.' });
     }
@@ -118,9 +192,10 @@ app.use('/mcp', storage.dbContext({ lock: false })); // MCP tự mở transactio
 app.get('/uploads/:name', async (req, res, next) => {
   try {
     const name = path.basename(req.params.name);
-    if (!/^[\w.-]+$/.test(name)) return res.status(404).end();
+    // Chỉ cho phép tên file an toàn (chống path traversal)
+    if (!/^[\w.-]+$/.test(name)) return void res.status(404).end();
     const file = await storage.getFile(name);
-    if (!file) return res.status(404).end();
+    if (!file) return void res.status(404).end();
     res.setHeader('Content-Type', file.mime);
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     if (name.endsWith('.har')) res.setHeader('Content-Disposition', 'attachment');
@@ -130,37 +205,41 @@ app.get('/uploads/:name', async (req, res, next) => {
   }
 });
 
-const nextStt = (db, projectId) =>
+/** STT kế tiếp trong một dự án (lớn nhất hiện có + 1). */
+const nextStt = (db: Database, projectId: string): number =>
   db.feedbacks.filter((f) => f.projectId === projectId).reduce((max, f) => Math.max(max, f.stt), 0) + 1;
 
-function setStatus(item, status) {
+/** Đổi trạng thái backlog; chuyển sang "done" thì ghi ngày hoàn thành, ngược lại xóa. */
+function setStatus(item: Feedback, status: FeedbackStatus): void {
   if (item.status === status) return;
   item.status = status;
   item.completedAt = status === 'done' ? now() : null;
 }
 
 /* ---------- Upload ---------- */
-const EXT_BY_MIME = {
+/** Đuôi file tương ứng với từng loại ảnh được phép tải lên. */
+const EXT_BY_MIME: Record<string, string> = {
   'image/png': '.png',
   'image/jpeg': '.jpg',
   'image/gif': '.gif',
   'image/webp': '.webp',
 };
 
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB mỗi ảnh
 const MAX_REQUEST_BYTES = Math.floor(4.2 * 1024 * 1024); // Vercel giới hạn body 4.5MB mỗi request
-const MAX_HAR_SIZE = 50 * 1024 * 1024;
+const MAX_HAR_SIZE = 50 * 1024 * 1024; // 50MB mỗi file HAR
+/** Tên field form chứa file HAR. */
 const HAR_FIELD = 'har_file';
 
-const isHarUpload = (file) =>
+/** File có phải HAR hợp lệ không: đúng field và (đuôi .har hoặc MIME JSON/octet-stream). */
+const isHarUpload = (file: Express.Multer.File): boolean =>
   file.fieldname === HAR_FIELD &&
   (/\.har$/i.test(file.originalname) || ['application/json', 'application/octet-stream'].includes(file.mimetype));
 
 const upload = multer({
   storage: multer.memoryStorage(), // file chỉ thực sự được lưu khi request thành công (cùng transaction với dữ liệu)
   limits: { fileSize: MAX_HAR_SIZE, files: 31 },
-  fileFilter: (req, file, cb) =>
-    cb(null, file.fieldname === HAR_FIELD ? isHarUpload(file) : Boolean(EXT_BY_MIME[file.mimetype])),
+  fileFilter: (req, file, cb) => cb(null, file.fieldname === HAR_FIELD ? isHarUpload(file) : Boolean(EXT_BY_MIME[file.mimetype])),
 });
 
 const multerFields = upload.fields([
@@ -170,16 +249,20 @@ const multerFields = upload.fields([
   { name: HAR_FIELD, maxCount: 1 },
 ]);
 
-// Giới hạn multer đặt theo file HAR (50MB) -> ảnh kiểm tra lại riêng (10MB).
-function uploadFields(req, res, next) {
-  multerFields(req, res, (err) => {
+/**
+ * Middleware nhận upload: chạy multer, kiểm tra lại giới hạn riêng của ảnh (multer chỉ đặt theo HAR 50MB),
+ * nén ảnh sang WebP rồi xếp hàng lưu file.
+ */
+function uploadFields(req: Request, res: Response, next: NextFunction): void {
+  multerFields(req, res, (err: unknown) => {
     // multer gọi lại từ luồng mạng -> chạy tiếp trong ngữ cảnh dữ liệu của request
     runInRequestStore(req, async () => {
       if (err) return next(err);
       const tooBig = allFiles(req.files).some((f) => f.fieldname !== HAR_FIELD && f.size > MAX_IMAGE_SIZE);
       if (tooBig) {
         stageUploads(req.files);
-        return failUpload(req, res, 400, 'Ảnh vượt quá 10MB.');
+        failUpload(req, res, 400, 'Ảnh vượt quá 10MB.');
+        return;
       }
       try {
         // nén ảnh sang WebP trước khi lưu
@@ -195,8 +278,8 @@ function uploadFields(req, res, next) {
               }
             })
         );
-      } catch (e) {
-        /* giữ ảnh gốc */
+      } catch {
+        // nén lỗi -> giữ ảnh gốc
       }
       stageUploads(req.files);
       next();
@@ -204,8 +287,8 @@ function uploadFields(req, res, next) {
   });
 }
 
-// Đặt tên file ngẫu nhiên và xếp hàng lưu (ghi vào Postgres / thư mục uploads khi commit)
-function stageUploads(files) {
+/** Đặt tên file ngẫu nhiên và xếp hàng lưu (ghi vào Postgres / thư mục uploads khi commit). */
+function stageUploads(files: Request['files']): void {
   for (const f of allFiles(files)) {
     const isHar = f.fieldname === HAR_FIELD;
     f.filename = crypto.randomUUID() + (isHar ? '.har' : EXT_BY_MIME[f.mimetype] || '.png');
@@ -219,38 +302,46 @@ function stageUploads(files) {
   }
 }
 
-const toHar = (files) => {
+/** Chuyển file HAR vừa tải lên thành thông tin lưu trong backlog; không có file -> null. */
+const toHar = (files: Express.Multer.File[] | undefined): Feedback['har'] => {
   const file = (files || [])[0];
   return file ? { url: '/uploads/' + file.filename, name: file.originalname || 'network.har', size: file.size } : null;
 };
 
-const toUrls = (files) => (files || []).map((f) => '/uploads/' + f.filename);
-const allFiles = (files) => Object.values(files || {}).flat();
+/** Danh sách đường dẫn `/uploads/...` của các file vừa tải lên. */
+const toUrls = (files: Express.Multer.File[] | undefined): string[] => (files || []).map((f) => '/uploads/' + f.filename);
 
-function removeFile(url) {
+/** Gộp mọi file của request (nhiều field) thành một mảng phẳng. */
+const allFiles = (files: Request['files']): Express.Multer.File[] =>
+  Array.isArray(files) ? files : Object.values((files || {}) as UploadedFiles).flat();
+
+/** Đánh dấu xóa file theo URL `/uploads/...` (xóa thật khi request thành công). */
+function removeFile(url: unknown): void {
   if (typeof url !== 'string' || !url.startsWith('/uploads/')) return;
   queueFileDelete(path.basename(url)); // xóa thật khi request thành công
 }
 
-const feedbackFiles = (f) => [f.location.image, ...f.bug.images, ...f.expected.images, f.har && f.har.url];
+/** Mọi file (ảnh + HAR) thuộc một backlog, dùng khi xóa backlog/dự án. */
+const feedbackFiles = (f: Feedback): Array<string | null> => [f.location.image, ...f.bug.images, ...f.expected.images, f.har && f.har.url];
 
-function parseList(value) {
+/** Parse chuỗi JSON thành mảng chuỗi; sai định dạng -> mảng rỗng. */
+function parseList(value: unknown): string[] {
   try {
-    const list = JSON.parse(value || '[]');
-    return Array.isArray(list) ? list : [];
-  } catch (e) {
+    const list: unknown = JSON.parse(typeof value === 'string' ? value : '[]');
+    return Array.isArray(list) ? (list as string[]) : [];
+  } catch {
     return [];
   }
 }
 
-// Trả lỗi cho request có upload: dọn file vừa tải lên để không bị rác.
-function failUpload(req, res, code, error) {
+/** Trả lỗi cho request có upload: dọn file vừa tải lên để không bị rác. */
+function failUpload(req: Request, res: Response, code: number, error: string): void {
   allFiles(req.files).forEach((f) => removeFile('/uploads/' + f.filename));
-  return res.status(code).json({ error });
+  res.status(code).json({ error });
 }
 
-// Tên lỗi / loại / ghi chú của backlog
-function feedbackMeta(body) {
+/** Kiểm tra và chuẩn hóa tên lỗi / loại / ghi chú của backlog. */
+function feedbackMeta(body: Record<string, unknown>): ValidationError | { title: string; type: string; note: string } {
   const title = str(body.title);
   const type = str(body.type);
   const note = str(body.note_text);
@@ -260,7 +351,16 @@ function feedbackMeta(body) {
 }
 
 /* ---------- API: Dự án ---------- */
-function validateProject(db, body, selfId) {
+
+/**
+ * Kiểm tra dữ liệu dự án gửi lên (tên, mã, mô tả).
+ * @param selfId id dự án đang sửa, để bỏ qua chính nó khi kiểm tra trùng
+ */
+function validateProject(
+  db: Database,
+  body: Record<string, unknown>,
+  selfId?: string
+): ValidationError | { name: string; code: string; description: string } {
   const name = str(body.name);
   if (!name) return { error: 'Vui lòng nhập tên dự án.' };
   if (name.length > 120) return { error: 'Tên dự án tối đa 120 ký tự.' };
@@ -283,7 +383,7 @@ app.get('/api/projects', (req, res) => {
 app.post('/api/projects', (req, res) => {
   const db = readDb();
   const result = validateProject(db, req.body || {});
-  if (result.error) return res.status(400).json(result);
+  if ('error' in result) return void res.status(400).json(result);
 
   const project = newProject(result.name, result.description, result.code);
   db.projects.push(project);
@@ -294,10 +394,10 @@ app.post('/api/projects', (req, res) => {
 app.put('/api/projects/:id', (req, res) => {
   const db = readDb();
   const project = db.projects.find((p) => p.id === req.params.id);
-  if (!project) return res.status(404).json({ error: 'Không tìm thấy dự án.' });
+  if (!project) return void res.status(404).json({ error: 'Không tìm thấy dự án.' });
 
   const result = validateProject(db, req.body || {}, project.id);
-  if (result.error) return res.status(400).json(result);
+  if ('error' in result) return void res.status(400).json(result);
 
   project.name = result.name;
   project.code = result.code;
@@ -311,9 +411,9 @@ app.put('/api/projects/:id', (req, res) => {
 app.delete('/api/projects/:id', (req, res) => {
   const db = readDb();
   const index = db.projects.findIndex((p) => p.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: 'Không tìm thấy dự án.' });
+  if (index === -1) return void res.status(404).json({ error: 'Không tìm thấy dự án.' });
 
-  const [project] = db.projects.splice(index, 1);
+  const [project] = db.projects.splice(index, 1) as [Project];
   const removed = db.feedbacks.filter((f) => f.projectId === project.id);
   db.feedbacks = db.feedbacks.filter((f) => f.projectId !== project.id);
   writeDb(db);
@@ -322,7 +422,13 @@ app.delete('/api/projects/:id', (req, res) => {
 });
 
 /* ---------- API: Team xử lý ---------- */
-function validateTeam(db, body, selfId) {
+
+/** Kiểm tra dữ liệu team gửi lên (tên không trùng, trưởng nhóm, mô tả). */
+function validateTeam(
+  db: Database,
+  body: Record<string, unknown>,
+  selfId?: string
+): ValidationError | { name: string; lead: string; description: string } {
   const name = str(body.name);
   if (!name) return { error: 'Vui lòng nhập tên team.' };
   if (name.length > 120) return { error: 'Tên team tối đa 120 ký tự.' };
@@ -341,7 +447,7 @@ app.get('/api/teams', (req, res) => {
 app.post('/api/teams', (req, res) => {
   const db = readDb();
   const result = validateTeam(db, req.body || {});
-  if (result.error) return res.status(400).json(result);
+  if ('error' in result) return void res.status(400).json(result);
 
   const team = newTeam(result.name, result.lead, result.description);
   db.teams.push(team);
@@ -352,10 +458,10 @@ app.post('/api/teams', (req, res) => {
 app.put('/api/teams/:id', (req, res) => {
   const db = readDb();
   const team = db.teams.find((t) => t.id === req.params.id);
-  if (!team) return res.status(404).json({ error: 'Không tìm thấy team.' });
+  if (!team) return void res.status(404).json({ error: 'Không tìm thấy team.' });
 
   const result = validateTeam(db, req.body || {}, team.id);
-  if (result.error) return res.status(400).json(result);
+  if ('error' in result) return void res.status(400).json(result);
 
   Object.assign(team, result, { updatedAt: now() });
   writeDb(db);
@@ -366,9 +472,9 @@ app.put('/api/teams/:id', (req, res) => {
 app.delete('/api/teams/:id', (req, res) => {
   const db = readDb();
   const index = db.teams.findIndex((t) => t.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: 'Không tìm thấy team.' });
+  if (index === -1) return void res.status(404).json({ error: 'Không tìm thấy team.' });
 
-  const [team] = db.teams.splice(index, 1);
+  const [team] = db.teams.splice(index, 1) as [Team];
   let unassigned = 0;
   for (const f of db.feedbacks) {
     if (f.teamId === team.id) {
@@ -385,23 +491,24 @@ app.get('/api/feedbacks', (req, res) => {
   res.json(readDb().feedbacks);
 });
 
+/** Tạo backlog mới (multipart: các field văn bản + ảnh vị trí / mô tả / kết quả mong muốn + file HAR). */
 app.post('/api/feedbacks', uploadFields, (req, res) => {
-  const files = req.files || {};
+  const files = (req.files || {}) as UploadedFiles;
   const db = readDb();
 
   const projectId = str(req.body.project_id);
   if (!db.projects.some((p) => p.id === projectId)) return failUpload(req, res, 400, 'Vui lòng chọn dự án.');
 
   const status = str(req.body.status) || 'todo';
-  if (!STATUSES.includes(status)) return failUpload(req, res, 400, 'Trạng thái không hợp lệ.');
+  if (!isStatus(status)) return failUpload(req, res, 400, 'Trạng thái không hợp lệ.');
 
   const teamId = str(req.body.team_id);
   if (teamId && !db.teams.some((t) => t.id === teamId)) return failUpload(req, res, 400, 'Team không tồn tại.');
 
   const meta = feedbackMeta(req.body);
-  if (meta.error) return failUpload(req, res, 400, meta.error);
+  if ('error' in meta) return failUpload(req, res, 400, meta.error);
 
-  const item = {
+  const item: Feedback = {
     id: crypto.randomUUID(),
     projectId,
     teamId,
@@ -427,8 +534,9 @@ app.post('/api/feedbacks', uploadFields, (req, res) => {
   res.status(201).json(item);
 });
 
+/** Cập nhật backlog: đổi dự án/team/trạng thái, thêm hoặc xóa ảnh và HAR. */
 app.put('/api/feedbacks/:id', uploadFields, (req, res) => {
-  const files = req.files || {};
+  const files = (req.files || {}) as UploadedFiles;
   const db = readDb();
   const item = db.feedbacks.find((f) => f.id === req.params.id);
   if (!item) return failUpload(req, res, 404, 'Không tìm thấy backlog.');
@@ -437,7 +545,7 @@ app.put('/api/feedbacks/:id', uploadFields, (req, res) => {
   if (!db.projects.some((p) => p.id === projectId)) return failUpload(req, res, 400, 'Vui lòng chọn dự án.');
 
   const status = str(req.body.status) || item.status;
-  if (!STATUSES.includes(status)) return failUpload(req, res, 400, 'Trạng thái không hợp lệ.');
+  if (!isStatus(status)) return failUpload(req, res, 400, 'Trạng thái không hợp lệ.');
 
   const teamId = str(req.body.team_id);
   if (teamId && !db.teams.some((t) => t.id === teamId)) return failUpload(req, res, 400, 'Team không tồn tại.');
@@ -460,7 +568,7 @@ app.put('/api/feedbacks/:id', uploadFields, (req, res) => {
 
   // Tên lỗi, loại, ghi chú
   const meta = feedbackMeta(req.body);
-  if (meta.error) return failUpload(req, res, 400, meta.error);
+  if ('error' in meta) return failUpload(req, res, 400, meta.error);
   Object.assign(item, meta);
 
   // Mô tả lỗi
@@ -473,9 +581,7 @@ app.put('/api/feedbacks/:id', uploadFields, (req, res) => {
   item.expected.text = str(req.body.expected_text);
   const removeExpected = parseList(req.body.remove_expected_images).filter((u) => item.expected.images.includes(u));
   removeExpected.forEach(removeFile);
-  item.expected.images = item.expected.images
-    .filter((u) => !removeExpected.includes(u))
-    .concat(toUrls(files.expected_images));
+  item.expected.images = item.expected.images.filter((u) => !removeExpected.includes(u)).concat(toUrls(files.expected_images));
 
   // File HAR (network log)
   const newHar = toHar(files[HAR_FIELD]);
@@ -493,10 +599,10 @@ app.put('/api/feedbacks/:id', uploadFields, (req, res) => {
 app.patch('/api/feedbacks/:id/status', (req, res) => {
   const db = readDb();
   const item = db.feedbacks.find((f) => f.id === req.params.id);
-  if (!item) return res.status(404).json({ error: 'Không tìm thấy backlog.' });
+  if (!item) return void res.status(404).json({ error: 'Không tìm thấy backlog.' });
 
   const status = str((req.body || {}).status);
-  if (!STATUSES.includes(status)) return res.status(400).json({ error: 'Trạng thái không hợp lệ.' });
+  if (!isStatus(status)) return void res.status(400).json({ error: 'Trạng thái không hợp lệ.' });
 
   setStatus(item, status);
   item.updatedAt = now();
@@ -508,10 +614,10 @@ app.patch('/api/feedbacks/:id/status', (req, res) => {
 app.patch('/api/feedbacks/:id/team', (req, res) => {
   const db = readDb();
   const item = db.feedbacks.find((f) => f.id === req.params.id);
-  if (!item) return res.status(404).json({ error: 'Không tìm thấy backlog.' });
+  if (!item) return void res.status(404).json({ error: 'Không tìm thấy backlog.' });
 
   const teamId = str((req.body || {}).team_id);
-  if (teamId && !db.teams.some((t) => t.id === teamId)) return res.status(400).json({ error: 'Team không tồn tại.' });
+  if (teamId && !db.teams.some((t) => t.id === teamId)) return void res.status(400).json({ error: 'Team không tồn tại.' });
 
   item.teamId = teamId;
   item.updatedAt = now();
@@ -522,31 +628,32 @@ app.patch('/api/feedbacks/:id/team', (req, res) => {
 app.delete('/api/feedbacks/:id', (req, res) => {
   const db = readDb();
   const index = db.feedbacks.findIndex((f) => f.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: 'Không tìm thấy backlog.' });
+  if (index === -1) return void res.status(404).json({ error: 'Không tìm thấy backlog.' });
 
-  const [item] = db.feedbacks.splice(index, 1);
+  const [item] = db.feedbacks.splice(index, 1) as [Feedback];
   writeDb(db);
   feedbackFiles(item).forEach(removeFile);
   res.json({ ok: true });
 });
 
 /* ---------- Xuất Excel ---------- */
-const STATUS_LABELS = { todo: 'Chưa làm', doing: 'Đang làm', done: 'Đã hoàn thành' };
+/** Nhãn tiếng Việt của trạng thái, dùng trong file Excel. */
+const STATUS_LABELS: Record<string, string> = { todo: 'Chưa làm', doing: 'Đang làm', done: 'Đã hoàn thành' };
 
 // Áp dụng cùng bộ lọc như giao diện: project, status, q
 app.get('/api/export', async (req, res, next) => {
   try {
     const db = readDb();
-    const projectName = (id) => (db.projects.find((p) => p.id === id) || {}).name || '';
-    const projectCode = (id) => (db.projects.find((p) => p.id === id) || {}).code || '';
-    const teamName = (id) => (db.teams.find((t) => t.id === id) || {}).name || '';
+    const projectName = (id: string): string => db.projects.find((p) => p.id === id)?.name || '';
+    const projectCode = (id: string): string => db.projects.find((p) => p.id === id)?.code || '';
+    const teamName = (id: string): string => db.teams.find((t) => t.id === id)?.name || '';
     const projectId = str(req.query.project);
     const teamFilter = str(req.query.team);
     const typeFilter = str(req.query.type);
     const status = str(req.query.status);
     const q = str(req.query.q).toLowerCase();
     const base = req.protocol + '://' + req.get('host');
-    const abs = (u) => (u ? base + u : '');
+    const abs = (u: string): string => (u ? base + u : '');
 
     const list = db.feedbacks
       .filter((f) => !projectId || f.projectId === projectId)
@@ -556,8 +663,11 @@ app.get('/api/export', async (req, res, next) => {
       .filter(
         (f) =>
           !q ||
-          [projectCode(f.projectId), projectName(f.projectId), f.type, f.title, f.location.url, f.bug.text, f.expected.text, f.note].some((s) =>
-            String(s || '').toLowerCase().includes(q)
+          [projectCode(f.projectId), projectName(f.projectId), f.type, f.title, f.location.url, f.bug.text, f.expected.text, f.note].some(
+            (s) =>
+              String(s || '')
+                .toLowerCase()
+                .includes(q)
           )
       )
       .sort((a, b) => projectName(a.projectId).localeCompare(projectName(b.projectId), 'vi') || a.stt - b.stt);
@@ -588,7 +698,7 @@ app.get('/api/export', async (req, res, next) => {
     head.font = { bold: true };
     head.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
 
-    const date = (v) => (v ? new Date(v) : null);
+    const date = (v: string | null): Date | null => (v ? new Date(v) : null);
     for (const f of list) {
       ws.addRow({
         code: projectCode(f.projectId),
@@ -628,9 +738,14 @@ app.get('/api/export', async (req, res, next) => {
 });
 
 /* ---------- Bảo mật: giới hạn tốc độ ---------- */
-// Giới hạn tốc độ in-memory, cửa sổ cố định.
-function makeLimiter(max, windowMs) {
-  const hits = new Map();
+
+/**
+ * Tạo bộ giới hạn tốc độ in-memory, cửa sổ cố định.
+ * @param max số lần tối đa trong một cửa sổ
+ * @param windowMs độ dài cửa sổ (ms)
+ */
+function makeLimiter(max: number, windowMs: number): Limiter {
+  const hits = new Map<string, { count: number; reset: number }>();
   const timer = setInterval(() => {
     const t = Date.now();
     for (const [k, v] of hits) if (v.reset <= t) hits.delete(k);
@@ -653,8 +768,6 @@ function makeLimiter(max, windowMs) {
   };
 }
 
-const safeEqual = (a, b) => crypto.timingSafeEqual(sha256(a), sha256(b)); // so sánh băm -> không lộ độ dài
-
 // DEV_NO_AUTH=1: bỏ xác thực (quản trị người dùng + MCP) — CHỈ dùng khi chạy local để thử.
 const DEV_NO_AUTH = process.env.DEV_NO_AUTH === '1';
 if (DEV_NO_AUTH) console.warn('[BẢO MẬT] DEV_NO_AUTH=1: quản lý người dùng và /mcp KHÔNG có xác thực — chỉ dùng khi chạy local!');
@@ -662,16 +775,21 @@ if (DEV_NO_AUTH) console.warn('[BẢO MẬT] DEV_NO_AUTH=1: quản lý người 
 /* ---------- Quản lý người dùng + token cá nhân ---------- */
 // Mỗi người dùng có 1 token riêng. Vai trò: read (chỉ đọc), write (đọc + ghi), admin (ghi + quản lý người dùng).
 // Không có khóa dùng chung: quản trị viên đầu tiên tạo bằng `npm run create-admin` trên server.
-const ROLES = ['read', 'write', 'admin'];
+const ROLES: Role[] = ['read', 'write', 'admin'];
+/** Type guard: chuỗi có phải quyền hợp lệ không. */
+const isRole = (v: string): v is Role => (ROLES as string[]).includes(v);
 
-// Admin còn dùng được = có token cá nhân hoặc có mật khẩu đăng nhập
-const isActiveAdmin = (u) => u.role === 'admin' && u.active && (Boolean(u.tokenHash) || Boolean(u.passwordHash));
-const bearer = (req) => {
+/** Admin còn dùng được = đang hoạt động và có token cá nhân hoặc mật khẩu đăng nhập. */
+const isActiveAdmin = (u: User): boolean => u.role === 'admin' && u.active && (Boolean(u.tokenHash) || Boolean(u.passwordHash));
+
+/** Lấy token từ header `Authorization: Bearer <token>`; không có -> ''. */
+const bearer = (req: Request): string => {
   const m = /^Bearer (.{1,256})$/i.exec(req.get('authorization') || '');
-  return m ? m[1] : '';
+  return m ? (m[1] as string) : '';
 };
 
-function issueToken(user) {
+/** Cấp token mới cho người dùng (ghi đè token cũ). Token gốc chỉ trả về đúng một lần, DB chỉ lưu băm. */
+function issueToken(user: User): string {
   const token = newToken();
   user.tokenHash = hashToken(token);
   user.tokenHint = tokenHint(token);
@@ -680,7 +798,8 @@ function issueToken(user) {
   return token; // chỉ trả về đúng 1 lần, DB chỉ lưu băm
 }
 
-const publicUser = (u) => ({
+/** Loại bỏ các giá trị băm nhạy cảm trước khi gửi người dùng ra giao diện. */
+const publicUser = (u: User): PublicUser => ({
   id: u.id,
   name: u.name,
   email: u.email,
@@ -696,10 +815,11 @@ const publicUser = (u) => ({
   updatedAt: u.updatedAt,
 });
 
-function findUserByToken(db, token) {
+/** Tìm người dùng theo token cá nhân (so sánh băm, thời gian cố định). */
+function findUserByToken(db: Database, token: string): User | null {
   if (!token || !token.startsWith(TOKEN_PREFIX)) return null;
   const hash = Buffer.from(hashToken(token), 'hex');
-  let found = null;
+  let found: User | null = null;
   for (const u of db.users) {
     // duyệt hết, không dừng sớm, để thời gian xử lý không phụ thuộc vị trí khớp
     if (u.tokenHash && crypto.timingSafeEqual(Buffer.from(u.tokenHash, 'hex'), hash)) found = u;
@@ -707,8 +827,8 @@ function findUserByToken(db, token) {
   return found;
 }
 
-// Nhật ký hoạt động quản trị (giữ 500 dòng gần nhất)
-function audit(db, actor, action, target) {
+/** Ghi nhật ký hoạt động quản trị (giữ 500 dòng gần nhất). */
+function audit(db: Database, actor: string, action: string, target: string): void {
   db.audit.push({ at: now(), actor, action, target });
   if (db.audit.length > 500) db.audit.splice(0, db.audit.length - 500);
 }
@@ -720,7 +840,8 @@ const adminBadAuth = makeLimiter(8, 15 * 60 * 1000); // sai token quản trị >
 const SESSION_PREFIX = 'fbs_';
 const SESSION_TTL = 8 * 60 * 60 * 1000;
 
-function createSession(db, userId) {
+/** Tạo phiên đăng nhập mới cho người dùng và dọn các phiên đã hết hạn. Trả về token phiên (chỉ lưu băm). */
+function createSession(db: Database, userId: string): string {
   const t = Date.now();
   for (const [k, v] of Object.entries(db.sessions)) if (v.exp <= t) delete db.sessions[k]; // dọn phiên hết hạn
   const token = SESSION_PREFIX + crypto.randomBytes(32).toString('base64url');
@@ -728,7 +849,8 @@ function createSession(db, userId) {
   return token;
 }
 
-function findSessionUser(db, token) {
+/** Tìm người dùng theo token phiên; hết hạn hoặc không tồn tại -> null. */
+function findSessionUser(db: Database, token: string): User | null {
   if (!token || !token.startsWith(SESSION_PREFIX)) return null;
   const s = db.sessions[hashToken(token)];
   if (!s || s.exp <= Date.now()) return null;
@@ -738,44 +860,62 @@ function findSessionUser(db, token) {
 // Băm giả để mọi lần đăng nhập đều tốn thời gian như nhau (không lộ email nào tồn tại)
 const DUMMY_PASSWORD_HASH = hashPassword(crypto.randomBytes(16).toString('hex'));
 
-function requireAdmin(req, res, next) {
+/**
+ * Middleware bảo vệ các API quản trị: giới hạn tốc độ, khóa IP khi sai nhiều lần,
+ * rồi xác thực bằng token phiên (đăng nhập mật khẩu) hoặc token cá nhân của admin.
+ */
+function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   const ip = req.ip || 'unknown';
+  // Đang bị khóa vì sai nhiều lần -> chặn luôn, không so sánh token nữa
   const locked = adminBadAuth.over(ip);
   if (locked) {
     res.setHeader('Retry-After', String(locked));
-    return res.status(429).json({ code: 'admin-locked', error: `Sai token quản trị quá nhiều lần, thử lại sau ${locked}s.` });
+    res.status(429).json({ code: 'admin-locked', error: `Sai token quản trị quá nhiều lần, thử lại sau ${locked}s.` });
+    return;
   }
   const wait = adminPerIp.hit(ip);
   if (wait) {
     res.setHeader('Retry-After', String(wait));
-    return res.status(429).json({ error: `Quá nhiều yêu cầu, thử lại sau ${wait}s.` });
+    res.status(429).json({ error: `Quá nhiều yêu cầu, thử lại sau ${wait}s.` });
+    return;
   }
   if (DEV_NO_AUTH) {
     req.admin = { id: '', name: 'local' };
-    return next();
+    next();
+    return;
   }
 
   const db = readDb();
   if (!db.users.some(isActiveAdmin)) {
-    return res.status(503).json({
+    res.status(503).json({
       code: 'admin-setup',
       error:
         'Chưa có quản trị viên nào. Đặt ADMIN_EMAIL + ADMIN_PASSWORD trong .env rồi khởi động lại, hoặc chạy: npm run create-admin -- "Họ tên" email@congty.vn',
     });
+    return;
   }
   const credential = bearer(req);
   const user = findSessionUser(db, credential) || findUserByToken(db, credential);
   if (!user) {
     adminBadAuth.hit(ip);
-    return res.status(401).json({ code: 'admin-auth', error: 'Thiếu hoặc sai token quản trị.' });
+    res.status(401).json({ code: 'admin-auth', error: 'Thiếu hoặc sai token quản trị.' });
+    return;
   }
   if (!user.active || user.role !== 'admin') {
-    return res.status(403).json({ code: 'admin-forbidden', error: 'Tài khoản này không có quyền quản trị.' });
+    res.status(403).json({ code: 'admin-forbidden', error: 'Tài khoản này không có quyền quản trị.' });
+    return;
   }
   req.admin = user;
-  touchLastUsed(user.id).then(() => next(), () => next());
+  touchLastUsed(user.id).then(
+    () => next(),
+    () => next()
+  );
 }
 
+/** Tên quản trị viên đang thao tác (ghi vào nhật ký); luôn có sau `requireAdmin`. */
+const adminName = (req: Request): string => req.admin?.name ?? 'admin';
+
+/** Biểu thức kiểm tra email đơn giản: có phần tên, @, tên miền và đuôi. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // Đăng nhập quản trị bằng email + mật khẩu -> trả về token phiên (dùng như Bearer cho /api/users)
@@ -784,12 +924,12 @@ app.post('/api/admin/login', (req, res) => {
   const locked = adminBadAuth.over(ip);
   if (locked) {
     res.setHeader('Retry-After', String(locked));
-    return res.status(429).json({ code: 'admin-locked', error: `Sai thông tin đăng nhập quá nhiều lần, thử lại sau ${locked}s.` });
+    return void res.status(429).json({ code: 'admin-locked', error: `Sai thông tin đăng nhập quá nhiều lần, thử lại sau ${locked}s.` });
   }
   const wait = adminPerIp.hit(ip);
   if (wait) {
     res.setHeader('Retry-After', String(wait));
-    return res.status(429).json({ error: `Quá nhiều yêu cầu, thử lại sau ${wait}s.` });
+    return void res.status(429).json({ error: `Quá nhiều yêu cầu, thử lại sau ${wait}s.` });
   }
 
   const body = req.body || {};
@@ -799,12 +939,12 @@ app.post('/api/admin/login', (req, res) => {
   const user = db.users.find((u) => u.email === email && u.passwordHash);
   // luôn băm mật khẩu (kể cả khi email không tồn tại) để thời gian xử lý không lộ thông tin
   const ok = verifyPassword(password, user ? user.passwordHash : DUMMY_PASSWORD_HASH) && Boolean(user);
-  if (!ok) {
+  if (!ok || !user) {
     adminBadAuth.hit(ip);
-    return res.status(401).json({ code: 'admin-auth', error: 'Email hoặc mật khẩu không đúng.' });
+    return void res.status(401).json({ code: 'admin-auth', error: 'Email hoặc mật khẩu không đúng.' });
   }
   if (!user.active || user.role !== 'admin') {
-    return res.status(403).json({ code: 'admin-forbidden', error: 'Tài khoản này không có quyền quản trị.' });
+    return void res.status(403).json({ code: 'admin-forbidden', error: 'Tài khoản này không có quyền quản trị.' });
   }
   const token = createSession(db, user.id);
   audit(db, user.name, 'đăng nhập quản trị', user.name);
@@ -812,6 +952,7 @@ app.post('/api/admin/login', (req, res) => {
   res.json({ token, name: user.name });
 });
 
+// Đăng xuất: hủy phiên trên server
 app.delete('/api/admin/session', (req, res) => {
   const token = bearer(req);
   const db = readDb();
@@ -824,7 +965,7 @@ app.delete('/api/admin/session', (req, res) => {
 
 // Admin cứng: ADMIN_EMAIL + ADMIN_PASSWORD trong .env -> mỗi lần khởi động đảm bảo tài khoản này tồn tại,
 // là admin, đang hoạt động và có đúng mật khẩu đó (mật khẩu chỉ lưu dạng băm trong db.json).
-function seedAdmin() {
+function seedAdmin(): void {
   const email = str(process.env.ADMIN_EMAIL).toLowerCase();
   const password = process.env.ADMIN_PASSWORD || '';
   if (!email && !password) return;
@@ -833,7 +974,7 @@ function seedAdmin() {
     return;
   }
   const db = readDb();
-  let user = db.users.find((u) => u.email === email);
+  let user: User | undefined = db.users.find((u) => u.email === email);
   let changed = false;
   if (!user) {
     user = {
@@ -867,7 +1008,12 @@ function seedAdmin() {
   }
 }
 
-function validateUser(db, body, selfId) {
+/** Kiểm tra dữ liệu người dùng gửi lên (tên, email không trùng, quyền, team, trạng thái hoạt động). */
+function validateUser(
+  db: Database,
+  body: Record<string, unknown>,
+  selfId?: string
+): ValidationError | { name: string; email: string; role: Role; teamId: string; active: boolean } {
   const name = str(body.name);
   if (!name) return { error: 'Vui lòng nhập tên người dùng.' };
   if (name.length > 120) return { error: 'Tên tối đa 120 ký tự.' };
@@ -878,7 +1024,7 @@ function validateUser(db, body, selfId) {
   if (db.users.some((u) => u.id !== selfId && u.email === email)) return { error: `Email "${email}" đã được dùng.` };
 
   const role = str(body.role) || 'read';
-  if (!ROLES.includes(role)) return { error: 'Quyền không hợp lệ.' };
+  if (!isRole(role)) return { error: 'Quyền không hợp lệ.' };
 
   const teamId = str(body.teamId);
   if (teamId && !db.teams.some((t) => t.id === teamId)) return { error: 'Team không tồn tại.' };
@@ -888,7 +1034,9 @@ function validateUser(db, body, selfId) {
 
 // Không cho làm mất quản trị viên cuối cùng (sẽ tự khóa mình ra ngoài)
 const LAST_ADMIN_ERROR = 'Đây là quản trị viên hoạt động cuối cùng — không thể hạ quyền, vô hiệu hóa, thu hồi token hoặc xóa.';
-const isLastAdmin = (db, user) => isActiveAdmin(user) && !db.users.some((u) => u.id !== user.id && isActiveAdmin(u));
+/** `true` nếu `user` là quản trị viên hoạt động duy nhất còn lại. */
+const isLastAdmin = (db: Database, user: User): boolean =>
+  isActiveAdmin(user) && !db.users.some((u) => u.id !== user.id && isActiveAdmin(u));
 
 app.get('/api/users', requireAdmin, (req, res) => {
   res.json(readDb().users.map(publicUser));
@@ -901,12 +1049,12 @@ app.get('/api/users/audit', requireAdmin, (req, res) => {
 app.post('/api/users', requireAdmin, (req, res) => {
   const db = readDb();
   const result = validateUser(db, req.body || {});
-  if (result.error) return res.status(400).json(result);
+  if ('error' in result) return void res.status(400).json(result);
 
-  const user = { id: crypto.randomUUID(), ...result, createdAt: now(), updatedAt: now() };
+  const user: User = { tokenHash: '', tokenHint: '', id: crypto.randomUUID(), ...result, createdAt: now(), updatedAt: now() };
   const token = issueToken(user);
   db.users.push(user);
-  audit(db, req.admin.name, `tạo người dùng (${user.role})`, user.name);
+  audit(db, adminName(req), `tạo người dùng (${user.role})`, user.name);
   writeDb(db);
   res.status(201).json({ user: publicUser(user), token });
 });
@@ -914,19 +1062,19 @@ app.post('/api/users', requireAdmin, (req, res) => {
 app.put('/api/users/:id', requireAdmin, (req, res) => {
   const db = readDb();
   const user = db.users.find((u) => u.id === req.params.id);
-  if (!user) return res.status(404).json({ error: 'Không tìm thấy người dùng.' });
+  if (!user) return void res.status(404).json({ error: 'Không tìm thấy người dùng.' });
 
   const result = validateUser(db, { active: user.active, ...(req.body || {}) }, user.id);
-  if (result.error) return res.status(400).json(result);
+  if ('error' in result) return void res.status(400).json(result);
   if (isLastAdmin(db, user) && (result.role !== 'admin' || !result.active)) {
-    return res.status(400).json({ error: LAST_ADMIN_ERROR });
+    return void res.status(400).json({ error: LAST_ADMIN_ERROR });
   }
 
   const changes = [];
   if (result.role !== user.role) changes.push(`quyền ${user.role} → ${result.role}`);
   if (result.active !== user.active) changes.push(result.active ? 'kích hoạt' : 'vô hiệu hóa');
   Object.assign(user, result, { updatedAt: now() });
-  audit(db, req.admin.name, `sửa người dùng${changes.length ? ' (' + changes.join(', ') + ')' : ''}`, user.name);
+  audit(db, adminName(req), `sửa người dùng${changes.length ? ' (' + changes.join(', ') + ')' : ''}`, user.name);
   writeDb(db);
   res.json(publicUser(user));
 });
@@ -935,11 +1083,11 @@ app.put('/api/users/:id', requireAdmin, (req, res) => {
 app.post('/api/users/:id/token', requireAdmin, (req, res) => {
   const db = readDb();
   const user = db.users.find((u) => u.id === req.params.id);
-  if (!user) return res.status(404).json({ error: 'Không tìm thấy người dùng.' });
+  if (!user) return void res.status(404).json({ error: 'Không tìm thấy người dùng.' });
 
   const token = issueToken(user);
   user.updatedAt = now();
-  audit(db, req.admin.name, 'cấp lại token', user.name);
+  audit(db, adminName(req), 'cấp lại token', user.name);
   writeDb(db);
   res.json({ user: publicUser(user), token });
 });
@@ -948,14 +1096,14 @@ app.post('/api/users/:id/token', requireAdmin, (req, res) => {
 app.delete('/api/users/:id/token', requireAdmin, (req, res) => {
   const db = readDb();
   const user = db.users.find((u) => u.id === req.params.id);
-  if (!user) return res.status(404).json({ error: 'Không tìm thấy người dùng.' });
-  if (isLastAdmin(db, user)) return res.status(400).json({ error: LAST_ADMIN_ERROR });
+  if (!user) return void res.status(404).json({ error: 'Không tìm thấy người dùng.' });
+  if (isLastAdmin(db, user)) return void res.status(400).json({ error: LAST_ADMIN_ERROR });
 
   user.tokenHash = '';
   user.tokenHint = '';
   user.tokenCreatedAt = null;
   user.updatedAt = now();
-  audit(db, req.admin.name, 'thu hồi token', user.name);
+  audit(db, adminName(req), 'thu hồi token', user.name);
   writeDb(db);
   res.json(publicUser(user));
 });
@@ -963,11 +1111,12 @@ app.delete('/api/users/:id/token', requireAdmin, (req, res) => {
 app.delete('/api/users/:id', requireAdmin, (req, res) => {
   const db = readDb();
   const index = db.users.findIndex((u) => u.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: 'Không tìm thấy người dùng.' });
-  if (isLastAdmin(db, db.users[index])) return res.status(400).json({ error: LAST_ADMIN_ERROR });
+  const target = db.users[index];
+  if (!target) return void res.status(404).json({ error: 'Không tìm thấy người dùng.' });
+  if (isLastAdmin(db, target)) return void res.status(400).json({ error: LAST_ADMIN_ERROR });
 
-  const [user] = db.users.splice(index, 1);
-  audit(db, req.admin.name, 'xóa người dùng', user.name);
+  const [user] = db.users.splice(index, 1) as [User];
+  audit(db, adminName(req), 'xóa người dùng', user.name);
   writeDb(db);
   res.json({ ok: true });
 });
@@ -989,12 +1138,14 @@ const MCP_MAX_CONCURRENT = 8;
 const MCP_REQUEST_TIMEOUT = 60 * 1000;
 let mcpActive = 0;
 
-const lastUsedWrites = new Map(); // userId -> thời điểm ghi lastUsedAt gần nhất (ghi tối đa 1 lần / phút / instance)
-async function touchLastUsed(userId) {
+const lastUsedWrites = new Map<string, number>(); // userId -> thời điểm ghi lastUsedAt gần nhất (ghi tối đa 1 lần / phút / instance)
+
+/** Cập nhật `lastUsedAt` của người dùng (giới hạn 1 lần/phút/instance để không ghi DB quá nhiều). */
+async function touchLastUsed(userId: string): Promise<void> {
   const t = Date.now();
   if (t - (lastUsedWrites.get(userId) || 0) < 60 * 1000) return;
   lastUsedWrites.set(userId, t);
-  const update = () => {
+  const update = (): void => {
     const db = readDb();
     const user = db.users.find((u) => u.id === userId);
     if (user) {
@@ -1008,7 +1159,7 @@ async function touchLastUsed(userId) {
 }
 
 // Nguồn dữ liệu cho MCP: đọc / ghi thẳng trong tiến trình (ghi mở transaction riêng, có khóa)
-const directBackend = (actor) => ({
+const directBackend = (actor: string): Backend => ({
   async loadAll() {
     const db = readDb();
     return { projects: db.projects, teams: db.teams, feedbacks: db.feedbacks };
@@ -1044,27 +1195,36 @@ const directBackend = (actor) => ({
     }),
 });
 
-const rpcError = (res, code, message) =>
+/** Trả lỗi theo chuẩn JSON-RPC cho client MCP. */
+const rpcError = (res: Response, code: number, message: string): Response =>
   res.status(code).json({ jsonrpc: '2.0', error: { code: -32000, message }, id: null });
 
-const tooMany = (res, seconds) => {
+/** Trả 429 kèm header Retry-After. */
+const tooMany = (res: Response, seconds: number): Response => {
   res.setHeader('Retry-After', String(seconds));
   return rpcError(res, 429, `Quá nhiều yêu cầu, thử lại sau ${seconds}s.`);
 };
 
+// Thông tin cho trang hướng dẫn MCP và form backlog (giới hạn upload)
 app.get('/api/mcp-info', (req, res) => {
   // maxUploadBytes: trên Vercel mỗi request tối đa ~4.5MB (0 = không giới hạn, chạy local)
-  res.json({ enabled: true, authRequired: !DEV_NO_AUTH, readonly: MCP_READONLY, maxUploadBytes: storage.mode === 'pg' ? MAX_REQUEST_BYTES : 0 });
+  const info: McpInfo = {
+    enabled: true,
+    authRequired: !DEV_NO_AUTH,
+    readonly: MCP_READONLY,
+    maxUploadBytes: storage.mode === 'pg' ? MAX_REQUEST_BYTES : 0,
+  };
+  res.json(info);
 });
 
 app.post('/mcp', async (req, res) => {
   const ip = req.ip || 'unknown';
   // Đang bị khóa vì sai token -> chặn luôn, không so sánh token nữa
   const locked = mcpBadAuth.over(ip);
-  if (locked) return tooMany(res, locked);
+  if (locked) return void tooMany(res, locked);
 
   const wait = mcpPerIp.hit(ip) || mcpGlobal.hit('all');
-  if (wait) return tooMany(res, wait);
+  if (wait) return void tooMany(res, wait);
 
   let actor = 'local';
   let canWrite = true;
@@ -1073,16 +1233,16 @@ app.post('/mcp', async (req, res) => {
     if (!user) {
       mcpBadAuth.hit(ip);
       res.setHeader('WWW-Authenticate', 'Bearer');
-      return rpcError(res, 401, 'Thiếu hoặc sai token (header Authorization: Bearer <token cá nhân>).');
+      return void rpcError(res, 401, 'Thiếu hoặc sai token (header Authorization: Bearer <token cá nhân>).');
     }
-    if (!user.active) return rpcError(res, 403, 'Tài khoản đã bị vô hiệu hóa. Liên hệ quản trị viên.');
+    if (!user.active) return void rpcError(res, 403, 'Tài khoản đã bị vô hiệu hóa. Liên hệ quản trị viên.');
     actor = user.name;
     canWrite = user.role === 'write' || user.role === 'admin';
     await touchLastUsed(user.id);
   }
   if (MCP_READONLY) canWrite = false;
 
-  if (mcpActive >= MCP_MAX_CONCURRENT) return tooMany(res, 5);
+  if (mcpActive >= MCP_MAX_CONCURRENT) return void tooMany(res, 5);
   mcpActive++;
   let released = false;
   const release = () => {
@@ -1128,10 +1288,12 @@ app.get('/', (req, res) => {
 });
 
 /* ---------- Error handler (multer, ...) ---------- */
-app.use((err, req, res, next) => {
+app.use((err: Error & { code?: string }, req: Request, res: Response, _next: NextFunction) => {
   try {
     allFiles(req.files).forEach((f) => f.filename && removeFile('/uploads/' + f.filename));
-  } catch (e) {}
+  } catch {
+    // dọn file lỗi thì bỏ qua, vẫn phải trả lời client
+  }
   const message = err.code === 'LIMIT_FILE_SIZE' ? 'File vượt quá 50MB.' : err.message || 'Lỗi hệ thống.';
   res.status(400).json({ error: message });
 });

@@ -5,7 +5,7 @@
  *
  * Hai cách chạy:
  *  1. HTTP (khuyến nghị khi deploy): server.js của web app mount sẵn tại  POST /mcp  (xem createMcpServer).
- *  2. stdio (chạy riêng trên máy dev):  node mcp/server.js
+ *  2. stdio (chạy riêng trên máy dev):  npx tsx mcp/server.ts   (hoặc node dist/mcp/server.js sau khi build)
  *       BACKLOG_URL       địa chỉ web app (mặc định http://localhost:3000)
  *       BACKLOG_READONLY  =1 để tắt các tool ghi
  *     (chế độ stdio nói chuyện thẳng với API, không đi qua xác thực token của /mcp)
@@ -16,14 +16,91 @@ import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { findRoot } from '../lib/paths.js';
+import type { Feedback, FeedbackStatus, Har, HarEntry, Project, Team } from '../shared/types.js';
 
-const { version } = createRequire(import.meta.url)('../package.json');
+// Đọc version từ package.json ở thư mục gốc (đúng cả khi chạy từ nguồn lẫn từ dist/)
+const { version } = createRequire(import.meta.url)(path.join(findRoot(import.meta.url), 'package.json')) as { version: string };
 
-const STATUS_LABEL = { todo: 'Chưa làm', doing: 'Đang làm', done: 'Đã hoàn thành' };
+/* ---------- Kiểu dữ liệu ---------- */
+
+/** Toàn bộ dữ liệu mà các tool cần để tra cứu. */
+interface BacklogContext {
+  projects: Project[];
+  teams: Team[];
+  feedbacks: Feedback[];
+}
+
+/** File đọc về từ backend (ảnh hoặc HAR). */
+interface FetchedFile {
+  buffer: Buffer;
+  mime: string;
+}
+
+/**
+ * Nguồn dữ liệu của MCP: có thể là HTTP tới web app (stdio) hoặc đọc thẳng DB (server.ts).
+ */
+interface Backend {
+  /** Tải toàn bộ dự án, team và backlog. */
+  loadAll(): Promise<BacklogContext>;
+  /** Tải một file đính kèm (ảnh/HAR) theo đường dẫn `/uploads/...`, từ chối nếu vượt `maxBytes`. */
+  fetchFile(url: string, maxBytes: number): Promise<FetchedFile>;
+  /** Đổi trạng thái backlog, trả về backlog sau khi cập nhật. */
+  setStatus(id: string, status: FeedbackStatus): Promise<Feedback>;
+  /** Giao backlog cho team (`''` = bỏ phân công), trả về backlog sau khi cập nhật. */
+  assignTeam(id: string, teamId: string): Promise<Feedback>;
+}
+
+/** Tuỳ chọn tạo MCP server. */
+interface McpServerOptions {
+  /** Nguồn dữ liệu. */
+  backend: Backend;
+  /** Địa chỉ công khai để dựng link ảnh / HAR trả cho dev. */
+  publicBase: string;
+  /** Có đăng ký tool ghi (đổi trạng thái / giao team) hay không. Mặc định `true`. */
+  canWrite?: boolean;
+}
+
+/** Điều kiện tìm một backlog: theo id, hoặc theo (project + stt). */
+interface BacklogRef {
+  id?: string;
+  project?: string;
+  stt?: number;
+}
+
+/** Kết quả tìm backlog: có `item` hoặc có `error`. */
+interface ResolveResult {
+  item?: Feedback;
+  error?: string;
+}
+
+/** Một phần nội dung trả về của tool MCP. */
+type ContentPart = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
+
+/** Kết quả trả về của tool MCP. */
+interface ToolResult {
+  [key: string]: unknown;
+  content: ContentPart[];
+  isError?: boolean;
+}
+
+/** Nhãn tiếng Việt của từng trạng thái. */
+const STATUS_LABEL: Record<FeedbackStatus, string> = { todo: 'Chưa làm', doing: 'Đang làm', done: 'Đã hoàn thành' };
+/** Schema zod của trạng thái, dùng cho đầu vào các tool. */
 const STATUS = z.enum(['todo', 'doing', 'done']);
 
-const norm = (s) => String(s || '').trim().toLowerCase();
-const findByIdOrName = (list, key) => {
+/** Chuẩn hóa chuỗi để so sánh: bỏ khoảng trắng hai đầu, chữ thường. */
+const norm = (s: unknown): string =>
+  String(s || '')
+    .trim()
+    .toLowerCase();
+
+/**
+ * Tìm một phần tử theo thứ tự ưu tiên: id chính xác -> mã dự án -> tên chính xác -> tên chứa từ khóa.
+ * @param list danh sách dự án hoặc team
+ * @param key id, mã hoặc tên người dùng nhập
+ */
+const findByIdOrName = <T extends { id: string; name: string; code?: string }>(list: T[], key: string): T | undefined => {
   const k = norm(key);
   return (
     list.find((x) => x.id === key) ||
@@ -40,54 +117,70 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGES_TOTAL_BYTES = 12 * 1024 * 1024;
 const MAX_HAR_ROWS = 50; // số request lỗi / chậm / api trả về tối đa mỗi nhóm
 
-const clip = (s) => (s.length > MAX_OUTPUT_CHARS ? s.slice(0, MAX_OUTPUT_CHARS) + `\n… (đã cắt, còn ${s.length - MAX_OUTPUT_CHARS} ký tự)` : s);
-const text = (obj) => ({ content: [{ type: 'text', text: clip(typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2)) }] });
+/** Cắt chuỗi quá dài và ghi chú số ký tự bị bỏ. */
+const clip = (s: string): string =>
+  s.length > MAX_OUTPUT_CHARS ? s.slice(0, MAX_OUTPUT_CHARS) + `\n… (đã cắt, còn ${s.length - MAX_OUTPUT_CHARS} ký tự)` : s;
 
-// Đọc body có chặn dung lượng (không tin content-length)
-async function readLimited(res, maxBytes) {
+/** Gói một đối tượng (hoặc chuỗi) thành kết quả text của tool, tự cắt nếu quá dài. */
+const text = (obj: unknown): ToolResult => ({
+  content: [{ type: 'text', text: clip(typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2)) }],
+});
+
+/**
+ * Đọc body của response có chặn dung lượng — không tin header content-length vì có thể sai/thiếu.
+ * @throws nếu body vượt `maxBytes`
+ */
+async function readLimited(res: Response, maxBytes: number): Promise<Buffer> {
   const declared = Number(res.headers.get('content-length') || 0);
   if (declared > maxBytes) throw new Error(`file quá lớn (${Math.round(declared / 1048576)}MB > ${Math.round(maxBytes / 1048576)}MB)`);
-  const chunks = [];
+  const chunks: Buffer[] = [];
   let size = 0;
-  for await (const chunk of res.body) {
+  for await (const chunk of res.body as unknown as AsyncIterable<Buffer>) {
     size += chunk.length;
     if (size > maxBytes) throw new Error(`file quá lớn (> ${Math.round(maxBytes / 1048576)}MB)`);
     chunks.push(chunk);
   }
   return Buffer.concat(chunks);
 }
-const fail = (msg) => ({ isError: true, content: [{ type: 'text', text: msg }] });
+
+/** Kết quả lỗi của tool (model nhìn thấy `isError: true`). */
+const fail = (msg: string): ToolResult => ({ isError: true, content: [{ type: 'text', text: msg }] });
 
 /**
  * Backend qua HTTP: nói chuyện với web app đang chạy ở nơi khác (chế độ stdio trên máy dev).
  * Trong server.js (Vercel / chạy chung tiến trình) dùng backend đọc thẳng dữ liệu, không cần HTTP.
  */
-function createHttpBackend(apiBase) {
+function createHttpBackend(apiBase: string): Backend {
   const API = apiBase.replace(/\/+$/, '');
 
-  async function http(path, options = {}) {
-    let res;
+  /** Gọi HTTP tới web app, ném lỗi dễ hiểu khi không kết nối được hoặc server trả lỗi. */
+  async function http(path: string, options: RequestInit = {}): Promise<Response> {
+    let res: Response;
     try {
       res = await fetch(API + path, { ...options, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     } catch (e) {
-      throw new Error(`Không kết nối được tới ${API} (${e.message}).`);
+      throw new Error(`Không kết nối được tới ${API} (${(e as Error).message}).`);
     }
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
       throw new Error(data.error || `HTTP ${res.status} khi gọi ${path}`);
     }
     return res;
   }
-  const getJson = async (path) => (await http(path)).json();
-  const patch = async (path, body) =>
-    (await http(path, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+  /** GET và parse JSON. */
+  const getJson = async <T>(path: string): Promise<T> => (await http(path)).json() as Promise<T>;
+  /** PATCH với body JSON và parse JSON phản hồi. */
+  const patch = async <T>(path: string, body: unknown): Promise<T> =>
+    (
+      await http(path, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    ).json() as Promise<T>;
 
   return {
     async loadAll() {
       const [projects, teams, feedbacks] = await Promise.all([
-        getJson('/api/projects'),
-        getJson('/api/teams'),
-        getJson('/api/feedbacks'),
+        getJson<Project[]>('/api/projects'),
+        getJson<Team[]>('/api/teams'),
+        getJson<Feedback[]>('/api/feedbacks'),
       ]);
       return { projects, teams, feedbacks };
     },
@@ -96,23 +189,23 @@ function createHttpBackend(apiBase) {
       const mime = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0];
       return { buffer: await readLimited(res, maxBytes), mime };
     },
-    setStatus: (id, status) => patch(`/api/feedbacks/${id}/status`, { status }),
-    assignTeam: (id, teamId) => patch(`/api/feedbacks/${id}/team`, { team_id: teamId }),
+    setStatus: (id, status) => patch<Feedback>(`/api/feedbacks/${id}/status`, { status }),
+    assignTeam: (id, teamId) => patch<Feedback>(`/api/feedbacks/${id}/team`, { team_id: teamId }),
   };
 }
 
 /**
- * @param {object} opts
- * @param {object} opts.backend      nguồn dữ liệu: { loadAll(), fetchFile(url, maxBytes), setStatus(id, status), assignTeam(id, teamId) }
- * @param {string} opts.publicBase   địa chỉ công khai để dựng link ảnh / HAR trả cho dev
- * @param {boolean} [opts.canWrite]  có đăng ký tool ghi (đổi trạng thái / giao team) hay không
+ * Tạo MCP server với đầy đủ tool (list_projects, list_teams, list_backlog, get_backlog, analyze_har
+ * và — nếu `canWrite` — update_backlog_status, assign_backlog_team).
  */
-function createMcpServer({ backend, publicBase, canWrite = true }) {
+function createMcpServer({ backend, publicBase, canWrite = true }: McpServerOptions): McpServer {
   const PUBLIC = publicBase.replace(/\/+$/, '');
-  const abs = (u) => (u ? PUBLIC + u : '');
-  const loadAll = () => backend.loadAll();
+  /** Biến đường dẫn tương đối `/uploads/x` thành URL tuyệt đối để dev mở được. */
+  const abs = (u: string): string => (u ? PUBLIC + u : '');
+  const loadAll = (): Promise<BacklogContext> => backend.loadAll();
 
-  function brief(f, ctx) {
+  /** Bản rút gọn của backlog dùng khi liệt kê. */
+  function brief(f: Feedback, ctx: BacklogContext) {
     const project = ctx.projects.find((p) => p.id === f.projectId);
     const team = ctx.teams.find((t) => t.id === f.teamId);
     return {
@@ -135,7 +228,8 @@ function createMcpServer({ backend, publicBase, canWrite = true }) {
     };
   }
 
-  function detail(f, ctx) {
+  /** Bản đầy đủ của backlog (kèm link ảnh, HAR) dùng cho get_backlog. */
+  function detail(f: Feedback, ctx: BacklogContext) {
     return {
       ...brief(f, ctx),
       bug: f.bug.text,
@@ -149,8 +243,8 @@ function createMcpServer({ backend, publicBase, canWrite = true }) {
     };
   }
 
-  // Tìm 1 backlog theo id, hoặc theo (project + stt)
-  function resolveBacklog(ctx, { id, project, stt }) {
+  /** Tìm 1 backlog theo id (đủ hoặc tiền tố duy nhất), hoặc theo (project + stt). */
+  function resolveBacklog(ctx: BacklogContext, { id, project, stt }: BacklogRef): ResolveResult {
     if (id) {
       const matches = ctx.feedbacks.filter((f) => f.id === id || f.id.startsWith(id));
       if (matches.length === 1) return { item: matches[0] };
@@ -167,41 +261,42 @@ function createMcpServer({ backend, publicBase, canWrite = true }) {
 
   const server = new McpServer({ name: 'feedback-backlog', version });
 
-  server.registerTool(
-    'list_projects',
-    { description: 'Liệt kê các dự án kèm số backlog theo trạng thái.', inputSchema: {} },
-    async () => {
-      const ctx = await loadAll();
-      return text(
-        ctx.projects.map((p) => {
-          const items = ctx.feedbacks.filter((f) => f.projectId === p.id);
-          const n = (s) => items.filter((f) => f.status === s).length;
-          return { id: p.id, name: p.name, code: p.code || null, description: p.description, total: items.length, todo: n('todo'), doing: n('doing'), done: n('done') };
-        })
-      );
-    }
-  );
+  server.registerTool('list_projects', { description: 'Liệt kê các dự án kèm số backlog theo trạng thái.', inputSchema: {} }, async () => {
+    const ctx = await loadAll();
+    return text(
+      ctx.projects.map((p) => {
+        const items = ctx.feedbacks.filter((f) => f.projectId === p.id);
+        const n = (s: FeedbackStatus) => items.filter((f) => f.status === s).length;
+        return {
+          id: p.id,
+          name: p.name,
+          code: p.code || null,
+          description: p.description,
+          total: items.length,
+          todo: n('todo'),
+          doing: n('doing'),
+          done: n('done'),
+        };
+      })
+    );
+  });
 
-  server.registerTool(
-    'list_teams',
-    { description: 'Liệt kê các team xử lý kèm số backlog đang giao.', inputSchema: {} },
-    async () => {
-      const ctx = await loadAll();
-      return text(
-        ctx.teams.map((t) => {
-          const items = ctx.feedbacks.filter((f) => f.teamId === t.id);
-          return {
-            id: t.id,
-            name: t.name,
-            lead: t.lead,
-            description: t.description,
-            open: items.filter((f) => f.status !== 'done').length,
-            total: items.length,
-          };
-        })
-      );
-    }
-  );
+  server.registerTool('list_teams', { description: 'Liệt kê các team xử lý kèm số backlog đang giao.', inputSchema: {} }, async () => {
+    const ctx = await loadAll();
+    return text(
+      ctx.teams.map((t) => {
+        const items = ctx.feedbacks.filter((f) => f.teamId === t.id);
+        return {
+          id: t.id,
+          name: t.name,
+          lead: t.lead,
+          description: t.description,
+          open: items.filter((f) => f.status !== 'done').length,
+          total: items.length,
+        };
+      })
+    );
+  });
 
   server.registerTool(
     'list_backlog',
@@ -242,7 +337,8 @@ function createMcpServer({ backend, publicBase, canWrite = true }) {
         list = list.filter((f) => [f.title, f.bug.text, f.expected.text, f.note, f.location.url].some((s) => norm(s).includes(q)));
       }
 
-      const order = { doing: 0, todo: 1, done: 2 };
+      // Đang làm lên đầu, rồi chưa làm, cuối cùng là đã xong; cùng trạng thái thì theo STT
+      const order: Record<FeedbackStatus, number> = { doing: 0, todo: 1, done: 2 };
       list = [...list].sort((a, b) => order[a.status] - order[b.status] || a.stt - b.stt);
       return text({ total: list.length, shown: Math.min(list.length, limit), items: list.slice(0, limit).map((f) => brief(f, ctx)) });
     }
@@ -264,9 +360,9 @@ function createMcpServer({ backend, publicBase, canWrite = true }) {
     async ({ id, project, stt, include_images }) => {
       const ctx = await loadAll();
       const { item, error } = resolveBacklog(ctx, { id, project, stt });
-      if (error) return fail(error);
+      if (!item) return fail(error ?? 'Không tìm thấy backlog.');
 
-      const content = [{ type: 'text', text: JSON.stringify(detail(item, ctx), null, 2) }];
+      const content: ContentPart[] = [{ type: 'text', text: JSON.stringify(detail(item, ctx), null, 2) }];
       if (include_images) {
         const urls = [item.location.image, ...item.bug.images, ...item.expected.images].filter(Boolean).slice(0, 6);
         let total = 0;
@@ -282,7 +378,7 @@ function createMcpServer({ backend, publicBase, canWrite = true }) {
             content.push({ type: 'text', text: `Ảnh: ${abs(url)}` });
             content.push({ type: 'image', data: buf.toString('base64'), mimeType });
           } catch (e) {
-            content.push({ type: 'text', text: `Không tải được ảnh ${abs(url)}: ${e.message}` });
+            content.push({ type: 'text', text: `Không tải được ảnh ${abs(url)}: ${(e as Error).message}` });
           }
         }
       }
@@ -307,18 +403,20 @@ function createMcpServer({ backend, publicBase, canWrite = true }) {
     async ({ id, project, stt, slow_ms, include_all }) => {
       const ctx = await loadAll();
       const { item, error } = resolveBacklog(ctx, { id, project, stt });
-      if (error) return fail(error);
+      if (!item) return fail(error ?? 'Không tìm thấy backlog.');
       if (!item.har) return fail('Backlog này không có file HAR.');
 
-      let har;
+      let har: Har;
       try {
-        har = JSON.parse((await backend.fetchFile(item.har.url, MAX_HAR_BYTES)).buffer.toString('utf8'));
+        har = JSON.parse((await backend.fetchFile(item.har.url, MAX_HAR_BYTES)).buffer.toString('utf8')) as Har;
       } catch (e) {
-        return fail(`Không đọc được file HAR: ${e.message}`);
+        return fail(`Không đọc được file HAR: ${(e as Error).message}`);
       }
-      const entries = (har.log && har.log.entries) || [];
-      const cut = (s, n = 600) => (s && s.length > n ? s.slice(0, n) + `… (+${s.length - n} ký tự)` : s || '');
-      const row = (e) => ({
+      const entries: HarEntry[] = (har.log && har.log.entries) || [];
+      /** Cắt body dài để không tràn bộ nhớ của model. */
+      const cut = (s: string | undefined, n = 600): string => (s && s.length > n ? s.slice(0, n) + `… (+${s.length - n} ký tự)` : s || '');
+      /** Rút gọn một request HAR thành các trường cần cho việc tìm lỗi. */
+      const row = (e: HarEntry) => ({
         method: e.request.method,
         url: e.request.url,
         status: e.response.status,
@@ -329,9 +427,12 @@ function createMcpServer({ backend, publicBase, canWrite = true }) {
         response_body: cut(e.response.content && e.response.content.text),
       });
 
+      // Lỗi = status >= 400 hoặc 0 (thất bại ở tầng mạng); chậm = vượt ngưỡng nhưng không lỗi; xhr = request gọi API
       const failed = entries.filter((e) => e.response.status >= 400 || e.response.status === 0);
       const slow = entries.filter((e) => e.time >= slow_ms && !failed.includes(e));
-      const xhr = entries.filter((e) => /^(xhr|fetch)$/i.test(e._resourceType || '') || /json/i.test((e.response.content || {}).mimeType || ''));
+      const xhr = entries.filter(
+        (e) => /^(xhr|fetch)$/i.test(e._resourceType || '') || /json/i.test((e.response.content || {}).mimeType || '')
+      );
 
       return text({
         har: item.har.name,
@@ -341,7 +442,9 @@ function createMcpServer({ backend, publicBase, canWrite = true }) {
         slow_count: slow.length,
         slow: slow.slice(0, MAX_HAR_ROWS).map(row),
         ...(include_all ? { api_requests: xhr.slice(0, MAX_HAR_ROWS).map(row) } : {}),
-        ...(failed.length > MAX_HAR_ROWS || slow.length > MAX_HAR_ROWS ? { note: `Mỗi nhóm chỉ hiển thị ${MAX_HAR_ROWS} request đầu.` } : {}),
+        ...(failed.length > MAX_HAR_ROWS || slow.length > MAX_HAR_ROWS
+          ? { note: `Mỗi nhóm chỉ hiển thị ${MAX_HAR_ROWS} request đầu.` }
+          : {}),
       });
     }
   );
@@ -363,7 +466,7 @@ function createMcpServer({ backend, publicBase, canWrite = true }) {
       async ({ id, project, stt, status }) => {
         const ctx = await loadAll();
         const { item, error } = resolveBacklog(ctx, { id, project, stt });
-        if (error) return fail(error);
+        if (!item) return fail(error ?? 'Không tìm thấy backlog.');
         return text(brief(await backend.setStatus(item.id, status), ctx));
       }
     );
@@ -382,7 +485,7 @@ function createMcpServer({ backend, publicBase, canWrite = true }) {
       async ({ id, project, stt, team }) => {
         const ctx = await loadAll();
         const { item, error } = resolveBacklog(ctx, { id, project, stt });
-        if (error) return fail(error);
+        if (!item) return fail(error ?? 'Không tìm thấy backlog.');
         let teamId = '';
         if (norm(team) !== 'none') {
           const t = findByIdOrName(ctx.teams, team);
@@ -398,8 +501,9 @@ function createMcpServer({ backend, publicBase, canWrite = true }) {
 }
 
 export { createMcpServer, createHttpBackend };
+export type { Backend, BacklogContext, FetchedFile, McpServerOptions };
 
-/* ---------- Chế độ stdio (chạy trực tiếp: node mcp/server.js) ---------- */
+/* ---------- Chế độ stdio (chạy trực tiếp: npx tsx mcp/server.ts) ---------- */
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const base = process.env.BACKLOG_URL || 'http://localhost:3000';
   createMcpServer({

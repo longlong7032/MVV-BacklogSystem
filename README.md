@@ -1,14 +1,18 @@
 # Feedback backlog
 
-Express + HBS + Tailwind (CDN), render phía client (CSR).
+Express + HBS + Tailwind (CDN), render phía client (CSR). Toàn bộ mã nguồn viết bằng **TypeScript** (server, giao diện và extension Chrome).
 
 ## Chạy
 
 ```bash
 npm install
-npm start        # http://localhost:3000  (đổi cổng: PORT=4000 npm start)
-npm run dev      # tự restart khi sửa code (Node 18.11+)
+npm run build    # biên dịch TypeScript: server -> dist/, giao diện -> public/js/app.js, extension -> chrome-extension/*.js
+npm start        # chạy bản đã build: http://localhost:3000  (đổi cổng: PORT=4000 npm start)
+npm run dev      # build giao diện rồi chạy server bằng tsx, tự restart khi sửa file .ts của server
+npm run typecheck   # chỉ kiểm tra kiểu, không sinh file
 ```
+
+Khi sửa giao diện (`client/app.ts`) trong lúc `npm run dev`, mở thêm một terminal chạy `npm run build:client -- --watch` rồi tải lại trang.
 
 ## Deploy lên Vercel + Postgres (Neon)
 
@@ -30,18 +34,23 @@ Vercel không cho ghi file, nên khi có biến kết nối Postgres app tự ch
    DATABASE_URL="postgresql://..." npm run migrate-to-pg                # chuyển thật (từ chối nếu DB đã có dữ liệu)
    ```
 
-**Giới hạn trên Vercel:** mỗi request tối đa ~4.5MB, nên ảnh được tự thu nhỏ (tối đa 1600px) ngay trên trình duyệt và tổng ảnh mỗi lần lưu tối đa ~4MB. File HAR từ extension Chrome lớn hơn mức này sẽ bị từ chối. Giới hạn tốc độ (rate limit) đếm riêng theo từng instance. Biến `PG_POOL_MAX` (mặc định 4) chỉnh số kết nối DB mỗi instance.
+**Giới hạn trên Vercel:** mỗi request tối đa ~4.5MB, nên ảnh được tự thu nhỏ (cạnh dài tối đa 2560px) ngay trên trình duyệt và tổng ảnh mỗi lần lưu tối đa ~4MB. File HAR từ extension Chrome lớn hơn mức này sẽ bị từ chối. Giới hạn tốc độ (rate limit) đếm riêng theo từng instance. Biến `PG_POOL_MAX` (mặc định 4) chỉnh số kết nối DB mỗi instance.
 
 ## Cấu trúc
 
 ```
-server.js            API + upload ảnh (multer) + MCP; export app cho Vercel
-lib/store.js         lưu trữ: Postgres (có DATABASE_URL) hoặc file JSON (local)
-api/index.js         điểm vào của Vercel (vercel.json rewrite mọi request về đây)
+server.ts            API + upload ảnh (multer) + MCP; export app cho Vercel
+shared/types.d.ts    kiểu dữ liệu dùng chung (Project, Team, Feedback, User, ...)
+lib/*.ts             lưu trữ (store), nén ảnh, token, nạp .env, tìm thư mục gốc
+mcp/server.ts        MCP server (các tool cho Claude Code / Cursor)
+scripts/*.ts         create-admin, migrate-to-pg
+dist/                bản build của server (sinh ra bởi npm run build, không commit)
+tsconfig*.json       cấu hình TypeScript: server / client / extension
+api/index.js         điểm vào của Vercel (file JS mỏng, import dist/server.js; vercel.json rewrite mọi request về đây)
 views/layout.hbs     layout, nạp Tailwind
 views/index.hbs      khung trang (toolbar, bảng, form, lightbox)
-public/js/app.js     toàn bộ render + logic phía client
-chrome-extension/    extension Chrome báo lỗi nhanh khi test
+client/app.ts        toàn bộ render + logic phía client (build ra public/js/app.js)
+chrome-extension/    extension Chrome báo lỗi nhanh khi test (mã nguồn trong src/*.ts, build ra *.js cùng thư mục)
 data/db.json         dữ liệu (tự tạo)
 uploads/             ảnh đính kèm
 ```
@@ -97,8 +106,9 @@ Backlog:
 Cài đặt:
 
 1. Mở `chrome://extensions`, bật **Developer mode**.
-2. Bấm **Load unpacked** → chọn thư mục `chrome-extension/`.
-3. Ghim extension lên thanh công cụ. Mặc định extension gửi tới `http://localhost:3000`; đổi trong mục **Cài đặt** ở cuối popup.
+2. Chạy `npm run build:extension` (biên dịch `chrome-extension/src/*.ts` ra `background.js`, `popup.js`, `devtools.js`).
+3. Bấm **Load unpacked** → chọn thư mục `chrome-extension/`. Sau mỗi lần sửa code, build lại rồi bấm Reload ở trang `chrome://extensions`.
+4. Ghim extension lên thanh công cụ. Mặc định extension gửi tới `http://localhost:3000`; đổi trong mục **Cài đặt** ở cuối popup.
 
 Cách dùng: đang test gặp lỗi → bấm icon extension (hoặc **Alt+Shift+B**) → form mở ra với:
 
@@ -154,4 +164,4 @@ Sau nginx / load balancer: bật HTTPS, chuyển tiếp `Host` + `X-Forwarded-Pr
 
 **Tool:** `list_projects`, `list_teams`, `list_backlog`, `get_backlog` (kèm ảnh), `analyze_har`, `update_backlog_status`, `assign_backlog_team`.
 
-Chạy local kiểu stdio vẫn dùng được: `BACKLOG_URL=http://localhost:3000 node mcp/server.js`.
+Chạy local kiểu stdio vẫn dùng được: `BACKLOG_URL=http://localhost:3000 npx tsx mcp/server.ts`.

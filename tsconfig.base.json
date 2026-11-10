@@ -1,0 +1,14 @@
+{
+  // Cấu hình TypeScript dùng chung cho cả server, client và extension.
+  "compilerOptions": {
+    "target": "ES2022",
+    "strict": true, // bật toàn bộ kiểm tra chặt (noImplicitAny, strictNullChecks, ...)
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "moduleDetection": "force", // mọi file đều là module -> không đụng tên biến toàn cục giữa các file
+    "sourceMap": false
+  }
+}
