@@ -10,10 +10,34 @@ npm start        # http://localhost:3000  (đổi cổng: PORT=4000 npm start)
 npm run dev      # tự restart khi sửa code (Node 18.11+)
 ```
 
+## Deploy lên Vercel + Postgres (Neon)
+
+Vercel không cho ghi file, nên khi có biến kết nối Postgres app tự chuyển sang lưu **toàn bộ dữ liệu và ảnh vào Postgres**. Không có biến này (chạy local) app vẫn dùng file `data/db.json` + thư mục `uploads/` như cũ, nên chạy thử local **không đụng dữ liệu production**.
+
+1. **Biến môi trường trên Vercel** (Project → Settings → Environment Variables):
+
+   | Biến | Ghi chú |
+   |---|---|
+   | `DATABASE_URL` | Chuỗi kết nối Postgres (Neon). Cũng nhận `POSTGRES_URL`, `POSTGRES_PRISMA_URL`, `NEON_DATABASE_URL` hoặc biến nào có dạng `postgresql://...` |
+   | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | Admin cứng — **đặt mật khẩu mạnh, khác môi trường local** |
+   | `PUBLIC_URL` | Không bắt buộc, vd `https://mvv-backlog.vercel.app` |
+
+2. Push code lên GitHub, Vercel tự build. Cấu hình nằm ở `vercel.json` + `api/index.js` (Express chạy như một serverless function). Bảng `app_state` và `files` được tạo tự động ở lần chạy đầu tiên.
+3. **Chuyển dữ liệu local lên** (một lần, không bắt buộc):
+
+   ```bash
+   DATABASE_URL="postgresql://..." npm run migrate-to-pg -- --dry-run   # xem sẽ chuyển gì
+   DATABASE_URL="postgresql://..." npm run migrate-to-pg                # chuyển thật (từ chối nếu DB đã có dữ liệu)
+   ```
+
+**Giới hạn trên Vercel:** mỗi request tối đa ~4.5MB, nên ảnh được tự thu nhỏ (tối đa 1600px) ngay trên trình duyệt và tổng ảnh mỗi lần lưu tối đa ~4MB. File HAR từ extension Chrome lớn hơn mức này sẽ bị từ chối. Giới hạn tốc độ (rate limit) đếm riêng theo từng instance. Biến `PG_POOL_MAX` (mặc định 4) chỉnh số kết nối DB mỗi instance.
+
 ## Cấu trúc
 
 ```
-server.js            API + upload ảnh (multer) + lưu JSON
+server.js            API + upload ảnh (multer) + MCP; export app cho Vercel
+lib/store.js         lưu trữ: Postgres (có DATABASE_URL) hoặc file JSON (local)
+api/index.js         điểm vào của Vercel (vercel.json rewrite mọi request về đây)
 views/layout.hbs     layout, nạp Tailwind
 views/index.hbs      khung trang (toolbar, bảng, form, lightbox)
 public/js/app.js     toàn bộ render + logic phía client
@@ -106,7 +130,7 @@ claude mcp add --transport http feedback-backlog https://<host>/mcp --header "Au
 | Đọc + ghi | + đổi trạng thái, giao team | — |
 | Quản trị viên | như Đọc + ghi | Quản lý người dùng, cấp / thu hồi token |
 
-Không có khóa dùng chung: quản trị viên đăng nhập trang Người dùng bằng **token cá nhân** của mình. Admin đầu tiên tạo bằng lệnh chạy trên server:
+Quản trị viên đăng nhập trang Người dùng bằng **email + mật khẩu** (admin cứng đặt trong `.env`, xem bên dưới) hoặc bằng **token cá nhân**. Ngoài ra có thể tạo admin bằng lệnh chạy trên server:
 
 ```bash
 npm run create-admin -- "Họ tên" email@congty.vn   # in token một lần; chạy lại với email cũ = cấp lại token
@@ -118,6 +142,7 @@ Không thể xóa / hạ quyền / vô hiệu hóa / thu hồi token của quả
 
 | Biến | Tác dụng |
 |---|---|
+| `ADMIN_EMAIL` + `ADMIN_PASSWORD` | Admin cứng: mỗi lần khởi động đảm bảo tài khoản này là admin đang hoạt động với đúng mật khẩu (tối thiểu 8 ký tự, lưu dạng băm scrypt). `ADMIN_NAME` đặt tên hiển thị. Đổi mật khẩu trong `.env` rồi khởi động lại |
 | `MCP_READONLY=1` | Ép toàn server chỉ đọc, bất kể quyền từng người |
 | `PUBLIC_URL` | Địa chỉ công khai của web app, dùng dựng link ảnh / HAR (mặc định lấy theo request) |
 | `TRUST_PROXY` | Số proxy phía trước app (mặc định 1 = nginx). Không có proxy thì đặt `0` |

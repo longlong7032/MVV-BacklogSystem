@@ -1,6 +1,6 @@
 (() => {
   const $ = (id) => document.getElementById(id);
-  const DEFAULT_SERVER = 'http://localhost:3000';
+  const DEFAULT_SERVER = 'https://mvv-backlog.vercel.app/';
   const MAX_IMAGES = 10;
   const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
   const SENSITIVE_HEADERS = /^(cookie|set-cookie|authorization|proxy-authorization|x-api-key|x-auth-token|x-access-token|x-csrf-token|x-xsrf-token)$/i;

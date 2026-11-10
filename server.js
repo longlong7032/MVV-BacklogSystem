@@ -1,20 +1,21 @@
-// Nạp file .env (Node >= 20.12). Biến môi trường đã đặt sẵn (vd trên server) luôn được ưu tiên hơn file.
-try {
-  process.loadEnvFile(require('path').join(__dirname, '.env'));
-} catch (e) {
-  if (e.code !== 'ENOENT') console.warn('Không đọc được .env:', e.message);
-}
+import './lib/env.js';
+import express from 'express';
+import hbs from 'hbs';
+import multer from 'multer';
+import path from 'node:path';
+import fs from 'node:fs';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import ExcelJS from 'exceljs';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { TOKEN_PREFIX, newToken, sha256, hashToken, tokenHint, hashPassword, verifyPassword } from './lib/tokens.js';
+import { createMcpServer } from './mcp/server.js';
+import { compressImage } from './lib/image.js';
+import { createStore, runInRequestStore, readDb, writeDb, isLocked, queueUpload, queueFileDelete } from './lib/store.js';
 
-const express = require('express');
-const { TOKEN_PREFIX, newToken, sha256, hashToken, tokenHint } = require('./lib/tokens');
-const hbs = require('hbs');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
-const ExcelJS = require('exceljs');
-const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
-const { createMcpServer } = require('./mcp/server');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const { version } = createRequire(import.meta.url)('./package.json');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -22,10 +23,6 @@ const PORT = process.env.PORT || 3000;
 // DATA_DIR / UPLOAD_DIR: đổi nơi lưu dữ liệu và ảnh (dùng khi deploy hoặc chạy thử mà không đụng dữ liệu thật)
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 const UPLOAD_DIR = process.env.UPLOAD_DIR ? path.resolve(process.env.UPLOAD_DIR) : path.join(__dirname, 'uploads');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
-
-fs.mkdirSync(DATA_DIR, { recursive: true });
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
 /* ---------- View engine ---------- */
 // Số proxy tin cậy phía trước app (nginx = 1). Không có proxy thì đặt TRUST_PROXY=0 để IP không bị giả mạo qua X-Forwarded-For.
@@ -42,15 +39,7 @@ app.set('view engine', 'hbs');
 app.set('views', path.join(__dirname, 'views'));
 
 /* ---------- Static ---------- */
-app.use('/public', express.static(path.join(__dirname, 'public')));
-app.use(
-  '/uploads',
-  express.static(UPLOAD_DIR, {
-    setHeaders: (res, file) => {
-      if (file.endsWith('.har')) res.setHeader('Content-Disposition', 'attachment');
-    },
-  })
-);
+app.use('/public', express.static(path.join(__dirname, 'public'), { maxAge: '10m' }));
 app.use(express.json({ limit: '256kb' }));
 
 /* ---------- Helpers ---------- */
@@ -75,6 +64,7 @@ function migrate(db) {
   db.teams = Array.isArray(db.teams) ? db.teams : [];
   db.users = Array.isArray(db.users) ? db.users : [];
   db.audit = Array.isArray(db.audit) ? db.audit : [];
+  db.sessions = db.sessions && typeof db.sessions === 'object' && !Array.isArray(db.sessions) ? db.sessions : {};
   for (const u of db.users) if (u.teamId && !db.teams.some((t) => t.id === u.teamId)) u.teamId = '';
   db.feedbacks = Array.isArray(db.feedbacks) ? db.feedbacks : [];
   for (const p of db.projects) if (typeof p.code !== 'string') p.code = '';
@@ -98,35 +88,50 @@ function migrate(db) {
   return db;
 }
 
-function readDb() {
+/* ---------- Lưu trữ: Postgres (có biến DATABASE_URL / POSTGRES_URL...) hoặc file JSON (local) ---------- */
+const storage = createStore({ migrate, dataDir: DATA_DIR, uploadDir: UPLOAD_DIR });
+
+// Khởi tạo (tạo bảng + admin cứng) một lần cho mỗi instance; lỗi thì cho thử lại ở request sau
+let readyPromise = null;
+const ensureReady = () =>
+  (readyPromise ||= (async () => {
+    await storage.init();
+    await storage.withStore(true, seedAdmin);
+  })().catch((e) => {
+    readyPromise = null;
+    throw e;
+  }));
+
+app.use(['/api', '/mcp', '/uploads'], (req, res, next) => {
+  ensureReady().then(
+    () => next(),
+    (e) => {
+      console.error('[db] khởi tạo thất bại:', e.message);
+      res.status(503).json({ error: 'Không khởi tạo được cơ sở dữ liệu, vui lòng thử lại sau.' });
+    }
+  );
+});
+app.use('/api', storage.dbContext()); // GET: chỉ đọc · POST/PUT/PATCH/DELETE: transaction + khóa dòng
+app.use('/mcp', storage.dbContext({ lock: false })); // MCP tự mở transaction riêng khi cần ghi
+
+// File tải lên (ảnh, HAR): đọc từ Postgres (Vercel) hoặc thư mục uploads (local)
+app.get('/uploads/:name', async (req, res, next) => {
   try {
-    return migrate(JSON.parse(fs.readFileSync(DB_FILE, 'utf8')));
+    const name = path.basename(req.params.name);
+    if (!/^[\w.-]+$/.test(name)) return res.status(404).end();
+    const file = await storage.getFile(name);
+    if (!file) return res.status(404).end();
+    res.setHeader('Content-Type', file.mime);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    if (name.endsWith('.har')) res.setHeader('Content-Disposition', 'attachment');
+    res.end(file.buffer);
   } catch (e) {
-    return migrate({});
+    next(e);
   }
-}
-
-function writeDb(db) {
-  const tmp = DB_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
-  fs.renameSync(tmp, DB_FILE);
-}
-
-if (fs.existsSync(DB_FILE)) writeDb(readDb()); // lưu lại dữ liệu đã chuẩn hóa
+});
 
 const nextStt = (db, projectId) =>
   db.feedbacks.filter((f) => f.projectId === projectId).reduce((max, f) => Math.max(max, f.stt), 0) + 1;
-
-// Người thực hiện (chỉ tin khi request đến từ MCP nội bộ, có khóa nội bộ)
-function internalActor(req) {
-  const key = String(req.get('x-internal-key') || '');
-  if (!key || !safeEqual(key, INTERNAL_KEY)) return '';
-  try {
-    return decodeURIComponent(String(req.get('x-actor') || '')).slice(0, 120);
-  } catch (e) {
-    return '';
-  }
-}
 
 function setStatus(item, status) {
   if (item.status === status) return;
@@ -143,6 +148,7 @@ const EXT_BY_MIME = {
 };
 
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
+const MAX_REQUEST_BYTES = Math.floor(4.2 * 1024 * 1024); // Vercel giới hạn body 4.5MB mỗi request
 const MAX_HAR_SIZE = 50 * 1024 * 1024;
 const HAR_FIELD = 'har_file';
 
@@ -151,13 +157,7 @@ const isHarUpload = (file) =>
   (/\.har$/i.test(file.originalname) || ['application/json', 'application/octet-stream'].includes(file.mimetype));
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: UPLOAD_DIR,
-    filename: (req, file, cb) => {
-      const ext = file.fieldname === HAR_FIELD ? '.har' : EXT_BY_MIME[file.mimetype] || '.png';
-      cb(null, crypto.randomUUID() + ext);
-    },
-  }),
+  storage: multer.memoryStorage(), // file chỉ thực sự được lưu khi request thành công (cùng transaction với dữ liệu)
   limits: { fileSize: MAX_HAR_SIZE, files: 31 },
   fileFilter: (req, file, cb) =>
     cb(null, file.fieldname === HAR_FIELD ? isHarUpload(file) : Boolean(EXT_BY_MIME[file.mimetype])),
@@ -173,11 +173,50 @@ const multerFields = upload.fields([
 // Giới hạn multer đặt theo file HAR (50MB) -> ảnh kiểm tra lại riêng (10MB).
 function uploadFields(req, res, next) {
   multerFields(req, res, (err) => {
-    if (err) return next(err);
-    const tooBig = allFiles(req.files).some((f) => f.fieldname !== HAR_FIELD && f.size > MAX_IMAGE_SIZE);
-    if (tooBig) return failUpload(req, res, 400, 'Ảnh vượt quá 10MB.');
-    next();
+    // multer gọi lại từ luồng mạng -> chạy tiếp trong ngữ cảnh dữ liệu của request
+    runInRequestStore(req, async () => {
+      if (err) return next(err);
+      const tooBig = allFiles(req.files).some((f) => f.fieldname !== HAR_FIELD && f.size > MAX_IMAGE_SIZE);
+      if (tooBig) {
+        stageUploads(req.files);
+        return failUpload(req, res, 400, 'Ảnh vượt quá 10MB.');
+      }
+      try {
+        // nén ảnh sang WebP trước khi lưu
+        await Promise.all(
+          allFiles(req.files)
+            .filter((f) => f.fieldname !== HAR_FIELD)
+            .map(async (f) => {
+              const out = await compressImage(f.buffer, f.mimetype);
+              if (out.ext) {
+                f.buffer = out.buffer;
+                f.size = out.buffer.length;
+                f.mimetype = out.mime;
+              }
+            })
+        );
+      } catch (e) {
+        /* giữ ảnh gốc */
+      }
+      stageUploads(req.files);
+      next();
+    });
   });
+}
+
+// Đặt tên file ngẫu nhiên và xếp hàng lưu (ghi vào Postgres / thư mục uploads khi commit)
+function stageUploads(files) {
+  for (const f of allFiles(files)) {
+    const isHar = f.fieldname === HAR_FIELD;
+    f.filename = crypto.randomUUID() + (isHar ? '.har' : EXT_BY_MIME[f.mimetype] || '.png');
+    queueUpload({
+      name: f.filename,
+      mime: isHar ? 'application/json' : f.mimetype,
+      size: f.size,
+      originalname: f.originalname,
+      buffer: f.buffer,
+    });
+  }
 }
 
 const toHar = (files) => {
@@ -190,8 +229,7 @@ const allFiles = (files) => Object.values(files || {}).flat();
 
 function removeFile(url) {
   if (typeof url !== 'string' || !url.startsWith('/uploads/')) return;
-  const file = path.join(UPLOAD_DIR, path.basename(url));
-  fs.unlink(file, () => {});
+  queueFileDelete(path.basename(url)); // xóa thật khi request thành công
 }
 
 const feedbackFiles = (f) => [f.location.image, ...f.bug.images, ...f.expected.images, f.har && f.har.url];
@@ -462,8 +500,6 @@ app.patch('/api/feedbacks/:id/status', (req, res) => {
 
   setStatus(item, status);
   item.updatedAt = now();
-  const actor = internalActor(req);
-  if (actor) item.updatedBy = actor;
   writeDb(db);
   res.json(item);
 });
@@ -479,8 +515,6 @@ app.patch('/api/feedbacks/:id/team', (req, res) => {
 
   item.teamId = teamId;
   item.updatedAt = now();
-  const actor = internalActor(req);
-  if (actor) item.updatedBy = actor;
   writeDb(db);
   res.json(item);
 });
@@ -629,9 +663,9 @@ if (DEV_NO_AUTH) console.warn('[BẢO MẬT] DEV_NO_AUTH=1: quản lý người 
 // Mỗi người dùng có 1 token riêng. Vai trò: read (chỉ đọc), write (đọc + ghi), admin (ghi + quản lý người dùng).
 // Không có khóa dùng chung: quản trị viên đầu tiên tạo bằng `npm run create-admin` trên server.
 const ROLES = ['read', 'write', 'admin'];
-const INTERNAL_KEY = crypto.randomBytes(32).toString('hex'); // MCP -> API nội bộ: tin header X-Actor
 
-const isActiveAdmin = (u) => u.role === 'admin' && u.active && Boolean(u.tokenHash);
+// Admin còn dùng được = có token cá nhân hoặc có mật khẩu đăng nhập
+const isActiveAdmin = (u) => u.role === 'admin' && u.active && (Boolean(u.tokenHash) || Boolean(u.passwordHash));
 const bearer = (req) => {
   const m = /^Bearer (.{1,256})$/i.exec(req.get('authorization') || '');
   return m ? m[1] : '';
@@ -654,6 +688,7 @@ const publicUser = (u) => ({
   teamId: u.teamId || '',
   active: u.active,
   hasToken: Boolean(u.tokenHash),
+  hasPassword: Boolean(u.passwordHash),
   tokenHint: u.tokenHash ? u.tokenHint : '',
   tokenCreatedAt: u.tokenCreatedAt || null,
   lastUsedAt: u.lastUsedAt || null,
@@ -681,6 +716,28 @@ function audit(db, actor, action, target) {
 const adminPerIp = makeLimiter(120, 60 * 1000); // 120 request quản trị / phút / IP
 const adminBadAuth = makeLimiter(8, 15 * 60 * 1000); // sai token quản trị > 8 lần / 15 phút -> khóa IP
 
+/* Phiên đăng nhập quản trị bằng email + mật khẩu: hết hạn sau 8 giờ, lưu trong DB (db.sessions) để mọi instance đều nhận ra */
+const SESSION_PREFIX = 'fbs_';
+const SESSION_TTL = 8 * 60 * 60 * 1000;
+
+function createSession(db, userId) {
+  const t = Date.now();
+  for (const [k, v] of Object.entries(db.sessions)) if (v.exp <= t) delete db.sessions[k]; // dọn phiên hết hạn
+  const token = SESSION_PREFIX + crypto.randomBytes(32).toString('base64url');
+  db.sessions[hashToken(token)] = { userId, exp: t + SESSION_TTL };
+  return token;
+}
+
+function findSessionUser(db, token) {
+  if (!token || !token.startsWith(SESSION_PREFIX)) return null;
+  const s = db.sessions[hashToken(token)];
+  if (!s || s.exp <= Date.now()) return null;
+  return db.users.find((u) => u.id === s.userId) || null;
+}
+
+// Băm giả để mọi lần đăng nhập đều tốn thời gian như nhau (không lộ email nào tồn tại)
+const DUMMY_PASSWORD_HASH = hashPassword(crypto.randomBytes(16).toString('hex'));
+
 function requireAdmin(req, res, next) {
   const ip = req.ip || 'unknown';
   const locked = adminBadAuth.over(ip);
@@ -702,10 +759,12 @@ function requireAdmin(req, res, next) {
   if (!db.users.some(isActiveAdmin)) {
     return res.status(503).json({
       code: 'admin-setup',
-      error: 'Chưa có quản trị viên nào. Chạy trên server: npm run create-admin -- "Họ tên" email@congty.vn',
+      error:
+        'Chưa có quản trị viên nào. Đặt ADMIN_EMAIL + ADMIN_PASSWORD trong .env rồi khởi động lại, hoặc chạy: npm run create-admin -- "Họ tên" email@congty.vn',
     });
   }
-  const user = findUserByToken(db, bearer(req));
+  const credential = bearer(req);
+  const user = findSessionUser(db, credential) || findUserByToken(db, credential);
   if (!user) {
     adminBadAuth.hit(ip);
     return res.status(401).json({ code: 'admin-auth', error: 'Thiếu hoặc sai token quản trị.' });
@@ -714,11 +773,99 @@ function requireAdmin(req, res, next) {
     return res.status(403).json({ code: 'admin-forbidden', error: 'Tài khoản này không có quyền quản trị.' });
   }
   req.admin = user;
-  touchLastUsed(user.id);
-  next();
+  touchLastUsed(user.id).then(() => next(), () => next());
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Đăng nhập quản trị bằng email + mật khẩu -> trả về token phiên (dùng như Bearer cho /api/users)
+app.post('/api/admin/login', (req, res) => {
+  const ip = req.ip || 'unknown';
+  const locked = adminBadAuth.over(ip);
+  if (locked) {
+    res.setHeader('Retry-After', String(locked));
+    return res.status(429).json({ code: 'admin-locked', error: `Sai thông tin đăng nhập quá nhiều lần, thử lại sau ${locked}s.` });
+  }
+  const wait = adminPerIp.hit(ip);
+  if (wait) {
+    res.setHeader('Retry-After', String(wait));
+    return res.status(429).json({ error: `Quá nhiều yêu cầu, thử lại sau ${wait}s.` });
+  }
+
+  const body = req.body || {};
+  const email = str(body.email).toLowerCase().slice(0, 200);
+  const password = typeof body.password === 'string' ? body.password.slice(0, 200) : '';
+  const db = readDb();
+  const user = db.users.find((u) => u.email === email && u.passwordHash);
+  // luôn băm mật khẩu (kể cả khi email không tồn tại) để thời gian xử lý không lộ thông tin
+  const ok = verifyPassword(password, user ? user.passwordHash : DUMMY_PASSWORD_HASH) && Boolean(user);
+  if (!ok) {
+    adminBadAuth.hit(ip);
+    return res.status(401).json({ code: 'admin-auth', error: 'Email hoặc mật khẩu không đúng.' });
+  }
+  if (!user.active || user.role !== 'admin') {
+    return res.status(403).json({ code: 'admin-forbidden', error: 'Tài khoản này không có quyền quản trị.' });
+  }
+  const token = createSession(db, user.id);
+  audit(db, user.name, 'đăng nhập quản trị', user.name);
+  writeDb(db);
+  res.json({ token, name: user.name });
+});
+
+app.delete('/api/admin/session', (req, res) => {
+  const token = bearer(req);
+  const db = readDb();
+  if (token.startsWith(SESSION_PREFIX) && db.sessions[hashToken(token)]) {
+    delete db.sessions[hashToken(token)];
+    writeDb(db);
+  }
+  res.json({ ok: true });
+});
+
+// Admin cứng: ADMIN_EMAIL + ADMIN_PASSWORD trong .env -> mỗi lần khởi động đảm bảo tài khoản này tồn tại,
+// là admin, đang hoạt động và có đúng mật khẩu đó (mật khẩu chỉ lưu dạng băm trong db.json).
+function seedAdmin() {
+  const email = str(process.env.ADMIN_EMAIL).toLowerCase();
+  const password = process.env.ADMIN_PASSWORD || '';
+  if (!email && !password) return;
+  if (!EMAIL_RE.test(email) || password.length < 8) {
+    console.warn('[Admin] ADMIN_EMAIL không hợp lệ hoặc ADMIN_PASSWORD ngắn hơn 8 ký tự -> bỏ qua admin cứng.');
+    return;
+  }
+  const db = readDb();
+  let user = db.users.find((u) => u.email === email);
+  let changed = false;
+  if (!user) {
+    user = {
+      id: crypto.randomUUID(),
+      name: str(process.env.ADMIN_NAME) || email.split('@')[0],
+      email,
+      role: 'admin',
+      teamId: '',
+      active: true,
+      tokenHash: '',
+      tokenHint: '',
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    db.users.push(user);
+    changed = true;
+  }
+  if (user.role !== 'admin' || !user.active) {
+    Object.assign(user, { role: 'admin', active: true, updatedAt: now() });
+    changed = true;
+  }
+  if (!verifyPassword(password, user.passwordHash)) {
+    user.passwordHash = hashPassword(password);
+    user.updatedAt = now();
+    changed = true;
+  }
+  if (changed) {
+    audit(db, 'hệ thống', 'đảm bảo admin cứng từ .env', user.name);
+    writeDb(db);
+    console.log(`[Admin] Đã đảm bảo admin: ${user.name} <${user.email}>`);
+  }
+}
 
 function validateUser(db, body, selfId) {
   const name = str(body.name);
@@ -842,18 +989,60 @@ const MCP_MAX_CONCURRENT = 8;
 const MCP_REQUEST_TIMEOUT = 60 * 1000;
 let mcpActive = 0;
 
-const lastUsedWrites = new Map(); // userId -> thời điểm ghi lastUsedAt gần nhất (ghi tối đa 1 lần / phút)
-function touchLastUsed(userId) {
+const lastUsedWrites = new Map(); // userId -> thời điểm ghi lastUsedAt gần nhất (ghi tối đa 1 lần / phút / instance)
+async function touchLastUsed(userId) {
   const t = Date.now();
   if (t - (lastUsedWrites.get(userId) || 0) < 60 * 1000) return;
   lastUsedWrites.set(userId, t);
-  const db = readDb();
-  const user = db.users.find((u) => u.id === userId);
-  if (user) {
-    user.lastUsedAt = now();
-    writeDb(db);
-  }
+  const update = () => {
+    const db = readDb();
+    const user = db.users.find((u) => u.id === userId);
+    if (user) {
+      user.lastUsedAt = now();
+      writeDb(db);
+    }
+  };
+  // Đang trong request ghi (đã giữ khóa) thì ghi thẳng, mở transaction thứ hai sẽ tự khóa chết
+  if (isLocked()) update();
+  else await storage.withStore(true, update);
 }
+
+// Nguồn dữ liệu cho MCP: đọc / ghi thẳng trong tiến trình (ghi mở transaction riêng, có khóa)
+const directBackend = (actor) => ({
+  async loadAll() {
+    const db = readDb();
+    return { projects: db.projects, teams: db.teams, feedbacks: db.feedbacks };
+  },
+  async fetchFile(url, maxBytes) {
+    const file = await storage.getFile(path.basename(String(url)));
+    if (!file) throw new Error('Không tìm thấy file.');
+    if (file.buffer.length > maxBytes) throw new Error(`file quá lớn (> ${Math.round(maxBytes / 1048576)}MB)`);
+    return file;
+  },
+  setStatus: (id, status) =>
+    storage.withStore(true, () => {
+      const db = readDb();
+      const item = db.feedbacks.find((f) => f.id === id);
+      if (!item) throw new Error('Không tìm thấy backlog.');
+      setStatus(item, status);
+      item.updatedAt = now();
+      if (actor) item.updatedBy = actor;
+      writeDb(db);
+      return item;
+    }),
+  assignTeam: (id, teamId) =>
+    storage.withStore(true, () => {
+      const db = readDb();
+      const item = db.feedbacks.find((f) => f.id === id);
+      if (!item) throw new Error('Không tìm thấy backlog.');
+      if (teamId && !db.teams.some((t) => t.id === teamId)) throw new Error('Team không tồn tại.');
+      item.teamId = teamId;
+      item.updatedAt = now();
+      if (actor) item.updatedBy = actor;
+      writeDb(db);
+      return item;
+    }),
+});
 
 const rpcError = (res, code, message) =>
   res.status(code).json({ jsonrpc: '2.0', error: { code: -32000, message }, id: null });
@@ -864,7 +1053,8 @@ const tooMany = (res, seconds) => {
 };
 
 app.get('/api/mcp-info', (req, res) => {
-  res.json({ enabled: true, authRequired: !DEV_NO_AUTH, readonly: MCP_READONLY });
+  // maxUploadBytes: trên Vercel mỗi request tối đa ~4.5MB (0 = không giới hạn, chạy local)
+  res.json({ enabled: true, authRequired: !DEV_NO_AUTH, readonly: MCP_READONLY, maxUploadBytes: storage.mode === 'pg' ? MAX_REQUEST_BYTES : 0 });
 });
 
 app.post('/mcp', async (req, res) => {
@@ -888,7 +1078,7 @@ app.post('/mcp', async (req, res) => {
     if (!user.active) return rpcError(res, 403, 'Tài khoản đã bị vô hiệu hóa. Liên hệ quản trị viên.');
     actor = user.name;
     canWrite = user.role === 'write' || user.role === 'admin';
-    touchLastUsed(user.id);
+    await touchLastUsed(user.id);
   }
   if (MCP_READONLY) canWrite = false;
 
@@ -910,11 +1100,9 @@ app.post('/mcp', async (req, res) => {
 
   try {
     const server = createMcpServer({
-      apiBase: `http://127.0.0.1:${PORT}`,
+      backend: directBackend(actor),
       publicBase: process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`,
       canWrite,
-      actor,
-      internalKey: INTERNAL_KEY,
     });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined }); // stateless
     res.on('close', () => {
@@ -936,12 +1124,14 @@ app.all('/mcp', (req, res) => rpcError(res, 405, 'Chỉ hỗ trợ POST.'));
 
 /* ---------- Page (CSR shell) ---------- */
 app.get('/', (req, res) => {
-  res.render('index', { title: 'Feedback backlog', version: require('./package.json').version });
+  res.render('index', { title: 'Feedback backlog', version });
 });
 
 /* ---------- Error handler (multer, ...) ---------- */
 app.use((err, req, res, next) => {
-  allFiles(req.files).forEach((f) => removeFile('/uploads/' + f.filename));
+  try {
+    allFiles(req.files).forEach((f) => f.filename && removeFile('/uploads/' + f.filename));
+  } catch (e) {}
   const message = err.code === 'LIMIT_FILE_SIZE' ? 'File vượt quá 50MB.' : err.message || 'Lỗi hệ thống.';
   res.status(400).json({ error: message });
 });
@@ -950,6 +1140,18 @@ app.use((err, req, res, next) => {
 process.on('uncaughtException', (e) => console.error('uncaughtException:', e));
 process.on('unhandledRejection', (e) => console.error('unhandledRejection:', e));
 
-app.listen(PORT, () => {
-  console.log('Feedback backlog chạy tại http://localhost:' + PORT);
-});
+export default app;
+
+// Chạy trực tiếp (npm start / npm run dev): mở cổng. Trên Vercel, api/index.js import app và Vercel tự xử lý request.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  ensureReady()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`Feedback backlog chạy tại http://localhost:${PORT} (lưu trữ: ${storage.mode === 'pg' ? 'Postgres' : 'file JSON'})`);
+      });
+    })
+    .catch((e) => {
+      console.error('Không khởi động được:', e.message);
+      process.exit(1);
+    });
+}

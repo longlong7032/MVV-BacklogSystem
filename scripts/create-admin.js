@@ -5,10 +5,13 @@
  * Nếu email đã tồn tại: nâng lên Admin, kích hoạt lại và cấp token mới (token cũ mất hiệu lực).
  * Token chỉ in ra đúng một lần.
  */
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const { newToken, hashToken, tokenHint } = require('../lib/tokens');
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { newToken, hashToken, tokenHint } from '../lib/tokens.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const DB_FILE = path.join(__dirname, '..', 'data', 'db.json');
 const [name, emailArg] = process.argv.slice(2);

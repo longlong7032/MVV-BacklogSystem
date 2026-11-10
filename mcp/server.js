@@ -10,8 +10,14 @@
  *       BACKLOG_READONLY  =1 để tắt các tool ghi
  *     (chế độ stdio nói chuyện thẳng với API, không đi qua xác thực token của /mcp)
  */
-const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
-const { z } = require('zod');
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod';
+
+const { version } = createRequire(import.meta.url)('../package.json');
 
 const STATUS_LABEL = { todo: 'Chưa làm', doing: 'Đang làm', done: 'Đã hoàn thành' };
 const STATUS = z.enum(['todo', 'doing', 'done']);
@@ -53,27 +59,16 @@ async function readLimited(res, maxBytes) {
 const fail = (msg) => ({ isError: true, content: [{ type: 'text', text: msg }] });
 
 /**
- * @param {object} opts
- * @param {string} opts.apiBase     địa chỉ gọi API (nội bộ cũng được, vd http://127.0.0.1:3000)
- * @param {string} [opts.publicBase] địa chỉ công khai để dựng link ảnh / HAR trả cho dev (mặc định = apiBase)
- * @param {boolean} [opts.canWrite] có đăng ký tool ghi (đổi trạng thái / giao team) hay không
- * @param {string} [opts.actor]     tên người dùng đang gọi, ghi vào "cập nhật bởi"
- * @param {string} [opts.internalKey] khóa nội bộ để server tin header X-Actor
+ * Backend qua HTTP: nói chuyện với web app đang chạy ở nơi khác (chế độ stdio trên máy dev).
+ * Trong server.js (Vercel / chạy chung tiến trình) dùng backend đọc thẳng dữ liệu, không cần HTTP.
  */
-function createMcpServer({ apiBase, publicBase, canWrite = true, actor = '', internalKey = '' }) {
+function createHttpBackend(apiBase) {
   const API = apiBase.replace(/\/+$/, '');
-  const PUBLIC = (publicBase || apiBase).replace(/\/+$/, '');
-  const abs = (u) => (u ? PUBLIC + u : '');
-  const auth = actor && internalKey ? { 'X-Internal-Key': internalKey, 'X-Actor': encodeURIComponent(actor) } : {};
 
   async function http(path, options = {}) {
     let res;
     try {
-      res = await fetch(API + path, {
-        ...options,
-        headers: { ...auth, ...(options.headers || {}) },
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      });
+      res = await fetch(API + path, { ...options, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
     } catch (e) {
       throw new Error(`Không kết nối được tới ${API} (${e.message}).`);
     }
@@ -84,15 +79,38 @@ function createMcpServer({ apiBase, publicBase, canWrite = true, actor = '', int
     return res;
   }
   const getJson = async (path) => (await http(path)).json();
+  const patch = async (path, body) =>
+    (await http(path, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
 
-  async function loadAll() {
-    const [projects, teams, feedbacks] = await Promise.all([
-      getJson('/api/projects'),
-      getJson('/api/teams'),
-      getJson('/api/feedbacks'),
-    ]);
-    return { projects, teams, feedbacks };
-  }
+  return {
+    async loadAll() {
+      const [projects, teams, feedbacks] = await Promise.all([
+        getJson('/api/projects'),
+        getJson('/api/teams'),
+        getJson('/api/feedbacks'),
+      ]);
+      return { projects, teams, feedbacks };
+    },
+    async fetchFile(url, maxBytes) {
+      const res = await http(url);
+      const mime = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0];
+      return { buffer: await readLimited(res, maxBytes), mime };
+    },
+    setStatus: (id, status) => patch(`/api/feedbacks/${id}/status`, { status }),
+    assignTeam: (id, teamId) => patch(`/api/feedbacks/${id}/team`, { team_id: teamId }),
+  };
+}
+
+/**
+ * @param {object} opts
+ * @param {object} opts.backend      nguồn dữ liệu: { loadAll(), fetchFile(url, maxBytes), setStatus(id, status), assignTeam(id, teamId) }
+ * @param {string} opts.publicBase   địa chỉ công khai để dựng link ảnh / HAR trả cho dev
+ * @param {boolean} [opts.canWrite]  có đăng ký tool ghi (đổi trạng thái / giao team) hay không
+ */
+function createMcpServer({ backend, publicBase, canWrite = true }) {
+  const PUBLIC = publicBase.replace(/\/+$/, '');
+  const abs = (u) => (u ? PUBLIC + u : '');
+  const loadAll = () => backend.loadAll();
 
   function brief(f, ctx) {
     const project = ctx.projects.find((p) => p.id === f.projectId);
@@ -147,7 +165,7 @@ function createMcpServer({ apiBase, publicBase, canWrite = true, actor = '', int
     return { error: 'Cần truyền "id", hoặc cả "project" và "stt".' };
   }
 
-  const server = new McpServer({ name: 'feedback-backlog', version: require('../package.json').version });
+  const server = new McpServer({ name: 'feedback-backlog', version });
 
   server.registerTool(
     'list_projects',
@@ -254,10 +272,8 @@ function createMcpServer({ apiBase, publicBase, canWrite = true, actor = '', int
         let total = 0;
         for (const url of urls) {
           try {
-            const res = await http(url);
-            const mimeType = (res.headers.get('content-type') || 'image/png').split(';')[0];
+            const { buffer: buf, mime: mimeType } = await backend.fetchFile(url, MAX_IMAGE_BYTES);
             if (!mimeType.startsWith('image/')) throw new Error('không phải ảnh');
-            const buf = await readLimited(res, MAX_IMAGE_BYTES);
             total += buf.length;
             if (total > MAX_IMAGES_TOTAL_BYTES) {
               content.push({ type: 'text', text: 'Đã đạt giới hạn dung lượng ảnh, bỏ qua các ảnh còn lại (xem link trong JSON).' });
@@ -296,7 +312,7 @@ function createMcpServer({ apiBase, publicBase, canWrite = true, actor = '', int
 
       let har;
       try {
-        har = JSON.parse((await readLimited(await http(item.har.url), MAX_HAR_BYTES)).toString('utf8'));
+        har = JSON.parse((await backend.fetchFile(item.har.url, MAX_HAR_BYTES)).buffer.toString('utf8'));
       } catch (e) {
         return fail(`Không đọc được file HAR: ${e.message}`);
       }
@@ -348,12 +364,7 @@ function createMcpServer({ apiBase, publicBase, canWrite = true, actor = '', int
         const ctx = await loadAll();
         const { item, error } = resolveBacklog(ctx, { id, project, stt });
         if (error) return fail(error);
-        const res = await http(`/api/feedbacks/${item.id}/status`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status }),
-        });
-        return text(brief(await res.json(), ctx));
+        return text(brief(await backend.setStatus(item.id, status), ctx));
       }
     );
 
@@ -378,12 +389,7 @@ function createMcpServer({ apiBase, publicBase, canWrite = true, actor = '', int
           if (!t) return fail(`Không tìm thấy team "${team}".`);
           teamId = t.id;
         }
-        const res = await http(`/api/feedbacks/${item.id}/team`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ team_id: teamId }),
-        });
-        return text(brief(await res.json(), ctx));
+        return text(brief(await backend.assignTeam(item.id, teamId), ctx));
       }
     );
   }
@@ -391,14 +397,14 @@ function createMcpServer({ apiBase, publicBase, canWrite = true, actor = '', int
   return server;
 }
 
-module.exports = { createMcpServer };
+export { createMcpServer, createHttpBackend };
 
 /* ---------- Chế độ stdio (chạy trực tiếp: node mcp/server.js) ---------- */
-if (require.main === module) {
-  const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const base = process.env.BACKLOG_URL || 'http://localhost:3000';
   createMcpServer({
-    apiBase: base,
+    backend: createHttpBackend(base),
+    publicBase: base,
     canWrite: process.env.BACKLOG_READONLY !== '1',
   })
     .connect(new StdioServerTransport())

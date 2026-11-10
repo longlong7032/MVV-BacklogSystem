@@ -112,6 +112,9 @@
   async function api(url, options = {}) {
     const res = await fetch(url, options);
     const data = await res.json().catch(() => ({}));
+    if (res.status === 413) {
+      throw new Error('Dung lượng tải lên quá lớn (tối đa khoảng 4MB mỗi lần lưu). Hãy bớt ảnh hoặc dùng ảnh nhỏ hơn.');
+    }
     if (!res.ok) throw new Error(data.error || 'Có lỗi xảy ra, vui lòng thử lại.');
     return data;
   }
@@ -637,7 +640,7 @@
         state.usersStatus = 'locked';
         adminKey.set('');
         // Lần đầu vào (chưa nhập khóa) thì không báo lỗi; nhập sai mới báo
-        state.usersMessage = e.code === 'admin-auth' ? (hadKey ? 'Token quản trị không đúng.' : '') : e.message;
+        state.usersMessage = e.code === 'admin-auth' ? (hadKey ? 'Phiên đăng nhập đã hết hạn hoặc token không đúng.' : '') : e.message;
       } else {
         state.usersStatus = 'error';
         state.usersMessage = e.message;
@@ -723,7 +726,7 @@
     } else {
       showUsersPane('usersLock');
       setError($('#adminKeyError'), state.usersStatus === 'error' ? state.usersMessage : state.usersMessage || '');
-      $('#adminKey').focus();
+      ($('#loginTokenFields').classList.contains('hidden') ? $('#adminEmail') : $('#adminKey')).focus();
     }
   };
 
@@ -1066,10 +1069,32 @@
     renderZone(name);
   };
 
-  const addFiles = (name, fileList) => {
+  // Thu nhỏ ảnh lớn (tối đa 1600px, JPEG) để không vượt giới hạn tải lên ~4MB / lần của Vercel và tải nhanh hơn trên di động
+  const shrinkImage = async (file) => {
+    if (file.type === 'image/gif' || file.size <= 700 * 1024) return file;
+    try {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, 2560 / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/webp', 0.9));
+      if (!blob || blob.size >= file.size) return file;
+      return new File([blob], file.name.replace(/\.\w+$/, '') + '.webp', { type: 'image/webp' });
+    } catch (e) {
+      return file; // không nén được thì giữ nguyên
+    }
+  };
+
+  const addFiles = async (name, fileList) => {
     const z = zones[name];
-    const images = [...fileList].filter((f) => f.type.startsWith('image/'));
-    if (!images.length) return;
+    const picked = [...fileList].filter((f) => f.type.startsWith('image/'));
+    if (!picked.length) return;
+    const images = await Promise.all(picked.map(shrinkImage));
 
     if (!z.multi) {
       z.removed.push(...z.existing);
@@ -1303,6 +1328,14 @@
     zones.location.files.forEach((f) => fd.append('location_image', f));
     zones.bug.files.forEach((f) => fd.append('bug_images', f));
     zones.expected.files.forEach((f) => fd.append('expected_images', f));
+
+    // Trên Vercel mỗi request chỉ nhận ~4MB: báo sớm thay vì để server từ chối sau khi đã tải lên
+    const info = mcp.info || (mcp.info = await api('/api/mcp-info').catch(() => ({})));
+    const totalBytes = ['location', 'bug', 'expected'].reduce((n, z) => n + zones[z].files.reduce((m, f) => m + f.size, 0), 0);
+    if (info.maxUploadBytes && totalBytes > info.maxUploadBytes) {
+      setError(errorBox, `Tổng dung lượng ảnh ${(totalBytes / 1048576).toFixed(1)}MB vượt giới hạn ${(info.maxUploadBytes / 1048576).toFixed(1)}MB mỗi lần lưu. Hãy bớt ảnh rồi lưu, sau đó thêm ảnh còn lại bằng nút Sửa.`);
+      return;
+    }
 
     if (state.editing) {
       if (zones.location.removed.length) fd.set('remove_location_image', '1');
@@ -1684,18 +1717,53 @@
   $$('[data-close-team]').forEach((el) => el.addEventListener('click', closeTeamForm));
 
   // Người dùng
+  // Đăng nhập quản trị: email + mật khẩu (mặc định) hoặc token cá nhân
+  let loginMode = 'password';
+  const setLoginMode = (mode) => {
+    loginMode = mode;
+    $('#loginPasswordFields').classList.toggle('hidden', mode !== 'password');
+    $('#loginTokenFields').classList.toggle('hidden', mode !== 'token');
+    $('#btnLoginMode').textContent = mode === 'password' ? 'Đăng nhập bằng token cá nhân' : 'Đăng nhập bằng email và mật khẩu';
+    setError($('#adminKeyError'), '');
+    (mode === 'password' ? $('#adminEmail') : $('#adminKey')).focus();
+  };
+  $('#btnLoginMode').addEventListener('click', () => setLoginMode(loginMode === 'password' ? 'token' : 'password'));
+
   $('#adminKeyForm').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const key = $('#adminKey').value.trim();
-    if (!key) return setError($('#adminKeyError'), 'Vui lòng dán token quản trị.');
-    adminKey.set(key);
-    $('#adminKey').value = '';
+    const errorBox = $('#adminKeyError');
+    setError(errorBox, '');
     const btn = $('#btnAdminKey');
+
+    if (loginMode === 'token') {
+      const key = $('#adminKey').value.trim();
+      if (!key) return setError(errorBox, 'Vui lòng dán token quản trị.');
+      adminKey.set(key);
+      $('#adminKey').value = '';
+    } else {
+      const email = $('#adminEmail').value.trim();
+      const password = $('#adminPassword').value;
+      if (!email || !password) return setError(errorBox, 'Vui lòng nhập email và mật khẩu.');
+      btn.disabled = true;
+      try {
+        const res = await api('/api/admin/login', jsonBody('POST', { email, password }));
+        adminKey.set(res.token);
+        $('#adminPassword').value = '';
+      } catch (err) {
+        setError(errorBox, err.message);
+        btn.disabled = false;
+        return;
+      }
+    }
     btn.disabled = true;
     await renderUsers();
     btn.disabled = false;
   });
   $('#btnLockAdmin').addEventListener('click', () => {
+    // Hủy phiên trên server (nếu đăng nhập bằng mật khẩu) rồi quay về màn đăng nhập
+    if (adminKey.get().startsWith('fbs_')) {
+      fetch('/api/admin/session', { method: 'DELETE', headers: { Authorization: 'Bearer ' + adminKey.get() } }).catch(() => {});
+    }
     adminKey.set('');
     state.users = [];
     renderUsers();
