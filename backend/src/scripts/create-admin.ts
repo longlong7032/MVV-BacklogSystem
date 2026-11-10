@@ -10,7 +10,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { newToken, hashToken, tokenHint } from '../lib/tokens.js';
 import { ROOT_DIR } from '../lib/paths.js';
-import type { Database, User } from '../shared/types.js';
+import type { Database, User } from '../types.js';
 
 /** File dữ liệu local mà script đọc/ghi trực tiếp (không đi qua server). */
 const DB_FILE = path.join(ROOT_DIR, 'data', 'db.json');

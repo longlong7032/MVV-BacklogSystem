@@ -1,18 +1,18 @@
 /**
- * Feedback backlog — máy chủ Express (API + MCP + trang CSR).
+ * Feedback backlog — BACKEND: máy chủ Express chỉ phục vụ API JSON, file tải lên và MCP.
+ * Không render giao diện; giao diện nằm ở project `frontend/` và gọi tới đây qua HTTP.
  *
  * Các phần chính (theo thứ tự trong file):
- *  1. Cấu hình Express, view engine, file tĩnh.
+ *  1. Cấu hình Express (header bảo mật, trust proxy, JSON body).
  *  2. Mô hình dữ liệu + `migrate` (chuẩn hóa dữ liệu cũ) + khởi tạo lưu trữ.
  *  3. Upload ảnh / HAR (multer) và API: dự án, team, backlog, xuất Excel.
  *  4. Bảo mật: giới hạn tốc độ, đăng nhập quản trị, người dùng + token cá nhân.
  *  5. MCP (Streamable HTTP) cho Claude Code / Cursor.
- *  6. Trang chủ, xử lý lỗi và khởi động (chạy trực tiếp hoặc export `app` cho Vercel).
+ *  6. Điểm kiểm tra sức khỏe, xử lý lỗi và khởi động (chạy trực tiếp hoặc export `app` cho Vercel).
  */
 import './lib/env.js'; // phải import đầu tiên để nạp .env trước khi các module khác đọc biến môi trường
 import express from 'express';
 import type { NextFunction, Request, Response } from 'express';
-import hbs from 'hbs';
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -27,7 +27,7 @@ import { compressImage } from './lib/image.js';
 import { createStore, runInRequestStore, readDb, writeDb, isLocked, queueUpload, queueFileDelete } from './lib/store.js';
 import { ROOT_DIR } from './lib/paths.js';
 import type { Backend } from './mcp/server.js';
-import type { AuditEntry, Database, Feedback, FeedbackStatus, McpInfo, Project, PublicUser, Role, Team, User } from './shared/types.js';
+import type { AuditEntry, Database, Feedback, FeedbackStatus, McpInfo, Project, PublicUser, Role, Team, User } from './types.js';
 
 /* ---------- Kiểu dữ liệu nội bộ ---------- */
 
@@ -65,7 +65,7 @@ interface Limiter {
 const { version } = createRequire(import.meta.url)(path.join(ROOT_DIR, 'package.json')) as { version: string };
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4000;
 
 // DATA_DIR / UPLOAD_DIR: đổi nơi lưu dữ liệu và ảnh (dùng khi deploy hoặc chạy thử mà không đụng dữ liệu thật)
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(ROOT_DIR, 'data');
@@ -88,11 +88,8 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'no-referrer');
   next();
 });
-app.set('view engine', 'hbs');
-app.set('views', path.join(ROOT_DIR, 'views'));
 
-/* ---------- Static ---------- */
-app.use('/public', express.static(path.join(ROOT_DIR, 'public'), { maxAge: '10m' }));
+/* ---------- Body ---------- */
 app.use(express.json({ limit: '256kb' }));
 
 /* ---------- Helpers ---------- */
@@ -840,6 +837,33 @@ const adminBadAuth = makeLimiter(8, 15 * 60 * 1000); // sai token quản trị >
 const SESSION_PREFIX = 'fbs_';
 const SESSION_TTL = 8 * 60 * 60 * 1000;
 
+/** Tên cookie lưu phiên quản trị (HttpOnly) để server render được trang Người dùng. */
+const ADMIN_COOKIE = 'fb_admin';
+
+/** Đọc một cookie từ header `Cookie`; không có -> ''. */
+function getCookie(req: Request, name: string): string {
+  for (const part of (req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) {
+      try {
+        return decodeURIComponent(part.slice(i + 1).trim());
+      } catch {
+        return '';
+      }
+    }
+  }
+  return '';
+}
+
+/** Đặt (hoặc xóa khi `token` rỗng) cookie phiên quản trị: HttpOnly + SameSite=Strict (chống CSRF). */
+function setAdminCookie(req: Request, res: Response, token: string): void {
+  const maxAge = token ? Math.floor(SESSION_TTL / 1000) : 0;
+  res.append(
+    'Set-Cookie',
+    `${ADMIN_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${req.secure ? '; Secure' : ''}`
+  );
+}
+
 /** Tạo phiên đăng nhập mới cho người dùng và dọn các phiên đã hết hạn. Trả về token phiên (chỉ lưu băm). */
 function createSession(db: Database, userId: string): string {
   const t = Date.now();
@@ -894,7 +918,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction): void {
     });
     return;
   }
-  const credential = bearer(req);
+  const credential = bearer(req) || getCookie(req, ADMIN_COOKIE);
   const user = findSessionUser(db, credential) || findUserByToken(db, credential);
   if (!user) {
     adminBadAuth.hit(ip);
@@ -933,15 +957,26 @@ app.post('/api/admin/login', (req, res) => {
   }
 
   const body = req.body || {};
-  const email = str(body.email).toLowerCase().slice(0, 200);
-  const password = typeof body.password === 'string' ? body.password.slice(0, 200) : '';
   const db = readDb();
-  const user = db.users.find((u) => u.email === email && u.passwordHash);
-  // luôn băm mật khẩu (kể cả khi email không tồn tại) để thời gian xử lý không lộ thông tin
-  const ok = verifyPassword(password, user ? user.passwordHash : DUMMY_PASSWORD_HASH) && Boolean(user);
+  // Hai cách đăng nhập: token cá nhân ({ token }) hoặc email + mật khẩu ({ email, password })
+  const personalToken = typeof body.token === 'string' ? body.token.trim().slice(0, 256) : '';
+  let user: User | undefined;
+  let ok: boolean;
+  if (personalToken) {
+    user = findUserByToken(db, personalToken) ?? undefined;
+    ok = Boolean(user);
+  } else {
+    const email = str(body.email).toLowerCase().slice(0, 200);
+    const password = typeof body.password === 'string' ? body.password.slice(0, 200) : '';
+    user = db.users.find((u) => u.email === email && u.passwordHash);
+    // luôn băm mật khẩu (kể cả khi email không tồn tại) để thời gian xử lý không lộ thông tin
+    ok = verifyPassword(password, user ? user.passwordHash : DUMMY_PASSWORD_HASH) && Boolean(user);
+  }
   if (!ok || !user) {
     adminBadAuth.hit(ip);
-    return void res.status(401).json({ code: 'admin-auth', error: 'Email hoặc mật khẩu không đúng.' });
+    return void res
+      .status(401)
+      .json({ code: 'admin-auth', error: personalToken ? 'Token không đúng.' : 'Email hoặc mật khẩu không đúng.' });
   }
   if (!user.active || user.role !== 'admin') {
     return void res.status(403).json({ code: 'admin-forbidden', error: 'Tài khoản này không có quyền quản trị.' });
@@ -949,17 +984,19 @@ app.post('/api/admin/login', (req, res) => {
   const token = createSession(db, user.id);
   audit(db, user.name, 'đăng nhập quản trị', user.name);
   writeDb(db);
+  setAdminCookie(req, res, token); // trình duyệt dùng cookie; token vẫn trả về cho client API khác
   res.json({ token, name: user.name });
 });
 
 // Đăng xuất: hủy phiên trên server
 app.delete('/api/admin/session', (req, res) => {
-  const token = bearer(req);
+  const token = bearer(req) || getCookie(req, ADMIN_COOKIE);
   const db = readDb();
   if (token.startsWith(SESSION_PREFIX) && db.sessions[hashToken(token)]) {
     delete db.sessions[hashToken(token)];
     writeDb(db);
   }
+  setAdminCookie(req, res, '');
   res.json({ ok: true });
 });
 
@@ -1205,16 +1242,18 @@ const tooMany = (res: Response, seconds: number): Response => {
   return rpcError(res, 429, `Quá nhiều yêu cầu, thử lại sau ${seconds}s.`);
 };
 
+/** Thông tin cấu hình MCP / xác thực / giới hạn upload. */
+const mcpInfo = (): McpInfo => ({
+  enabled: true,
+  authRequired: !DEV_NO_AUTH,
+  readonly: MCP_READONLY,
+  maxUploadBytes: storage.mode === 'pg' ? MAX_REQUEST_BYTES : 0,
+});
+
 // Thông tin cho trang hướng dẫn MCP và form backlog (giới hạn upload)
 app.get('/api/mcp-info', (req, res) => {
   // maxUploadBytes: trên Vercel mỗi request tối đa ~4.5MB (0 = không giới hạn, chạy local)
-  const info: McpInfo = {
-    enabled: true,
-    authRequired: !DEV_NO_AUTH,
-    readonly: MCP_READONLY,
-    maxUploadBytes: storage.mode === 'pg' ? MAX_REQUEST_BYTES : 0,
-  };
-  res.json(info);
+  res.json(mcpInfo());
 });
 
 app.post('/mcp', async (req, res) => {
@@ -1282,9 +1321,10 @@ app.post('/mcp', async (req, res) => {
 // Chế độ stateless: không hỗ trợ stream GET / DELETE session
 app.all('/mcp', (req, res) => rpcError(res, 405, 'Chỉ hỗ trợ POST.'));
 
-/* ---------- Page (CSR shell) ---------- */
-app.get('/', (req, res) => {
-  res.render('index', { title: 'Feedback backlog', version });
+/* ---------- Kiểm tra sức khỏe ---------- */
+// Frontend và hệ thống giám sát dùng để biết backend còn sống
+app.get(['/', '/health'], (req, res) => {
+  res.json({ name: 'feedback-backlog-backend', version, storage: storage.mode });
 });
 
 /* ---------- Error handler (multer, ...) ---------- */

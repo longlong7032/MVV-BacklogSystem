@@ -4,7 +4,7 @@
  * Chạy ngầm khi DevTools đang mở cho một tab: cho phép popup lấy HAR đầy đủ (kèm response body),
  * giống "Export HAR" trong tab Network. Popup gửi tin nhắn `devtools:getHar`, trang này dựng HAR và trả lời.
  */
-import type { Har, HarEntry } from '../../shared/types.js';
+import type { Har, HarEntry } from './types.js';
 
 /** Request đã kết thúc do DevTools báo, có thêm `getContent` để lấy response body. */
 type FinishedRequest = chrome.devtools.network.Request;

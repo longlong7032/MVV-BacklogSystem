@@ -1,0 +1,165 @@
+<section class="space-y-4">
+  <!-- Tiêu đề + hành động chính -->
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <p class="min-w-0 text-sm text-slate-500">Ghi nhận, phân công và theo dõi lỗi theo từng dự án.</p>
+    <div class="flex gap-2">
+      <a href="{{exportHref}}" class="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-200">
+        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M10.75 2.75a.75.75 0 0 0-1.5 0v8.69L6.53 8.72a.75.75 0 0 0-1.06 1.06l4 4a.75.75 0 0 0 1.06 0l4-4a.75.75 0 1 0-1.06-1.06l-2.72 2.72V2.75Z"/><path d="M3.5 13.75a.75.75 0 0 0-1.5 0v1.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-1.5a.75.75 0 0 0-1.5 0v1.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-1.5Z"/></svg>
+        <span class="hidden sm:inline">Tải Excel</span><span class="sm:hidden">Excel</span>
+      </a>
+      <button type="button" data-open-form="feedback" class="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-300">
+        <span aria-hidden="true" class="text-lg leading-none">+</span> Thêm backlog
+      </button>
+    </div>
+  </div>
+
+  <!-- Thẻ thống kê (bấm để lọc theo trạng thái) -->
+  <div class="grid grid-cols-2 gap-3 xl:grid-cols-4" role="tablist" aria-label="Lọc theo trạng thái">
+    {{#each tabs}}
+    <a href="{{href}}" role="tab" aria-selected="{{active}}" class="rounded-lg border bg-white p-4 text-left shadow-sm transition hover:shadow {{#if active}}border-indigo-500 ring-2 ring-indigo-200{{else}}border-slate-200{{/if}}">
+      <div class="flex items-center justify-between">
+        <span class="text-sm font-medium text-slate-500">{{label}}</span>
+        <span class="h-2.5 w-2.5 rounded-full {{dot}}"></span>
+      </div>
+      <p class="mt-1 text-2xl font-semibold text-slate-900">{{count}}</p>
+      <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full {{bar}}" style="width:{{pct}}%"></div></div>
+    </a>
+    {{/each}}
+  </div>
+
+  <!-- Tìm kiếm + bộ lọc nâng cao (GET: lọc nằm trên URL, server render lại trang) -->
+  <form method="get" action="/backlog" id="filterForm" class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <input type="hidden" name="status" value="{{filters.status}}">
+    {{#if board}}<input type="hidden" name="mode" value="board">{{/if}}
+    <label for="filterQuery" class="mb-1.5 block text-sm font-semibold text-slate-700">Tìm kiếm</label>
+    <div class="flex items-center gap-2">
+      <div class="relative min-w-0 flex-1">
+        <svg class="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clip-rule="evenodd"/></svg>
+        <input id="filterQuery" name="q" value="{{filters.q}}" type="search" placeholder="Tìm mã dự án, tên lỗi, mô tả, ghi chú..." autocomplete="off"
+          class="h-11 w-full rounded-lg border border-slate-300 bg-white pl-10 pr-3 text-base focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 sm:text-sm">
+      </div>
+      <button type="button" data-toggle="#filterPanel" aria-expanded="{{#if advanced}}true{{else}}false{{/if}}" aria-controls="filterPanel"
+        class="relative inline-flex h-11 shrink-0 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-200 sm:px-4">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M3 5.75A.75.75 0 0 1 3.75 5h5.5a.75.75 0 0 1 0 1.5h-5.5A.75.75 0 0 1 3 5.75Zm9.5 0a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 0 1.5h-3a.75.75 0 0 1-.75-.75ZM3 14.25a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 0 1.5h-3a.75.75 0 0 1-.75-.75Zm7 0a.75.75 0 0 1 .75-.75h5.5a.75.75 0 0 1 0 1.5h-5.5a.75.75 0 0 1-.75-.75ZM9 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm2 9a2 2 0 1 1 4 0 2 2 0 0 1-4 0Z"/></svg>
+        <span class="hidden sm:inline">Bộ lọc</span>
+        {{#if advanced}}<span class="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-indigo-600 px-1.5 text-xs font-semibold text-white">{{advanced}}</span>{{/if}}
+      </button>
+      {{#if anyFilter}}
+      <a href="{{clearHref}}" aria-label="Xóa tất cả bộ lọc" title="Xóa tất cả bộ lọc"
+        class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-red-50 hover:text-red-600 focus:outline-none focus:ring-2 focus:ring-indigo-200">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M3 3.75A.75.75 0 0 1 3.75 3h12.5a.75.75 0 0 1 .53 1.28L12 9.06v5.69a.75.75 0 0 1-.33.62l-2.5 1.67A.75.75 0 0 1 8 16.42V9.06L3.22 4.28A.75.75 0 0 1 3 3.75Z"/><path d="M14.22 12.22a.75.75 0 0 1 1.06 0l.97.97.97-.97a.75.75 0 1 1 1.06 1.06l-.97.97.97.97a.75.75 0 1 1-1.06 1.06l-.97-.97-.97.97a.75.75 0 1 1-1.06-1.06l.97-.97-.97-.97a.75.75 0 0 1 0-1.06Z"/></svg>
+      </a>
+      {{/if}}
+    </div>
+
+    <!-- Panel lọc nâng cao -->
+    <div id="filterPanel" class="mt-3 {{#if advanced}}grid{{else}}hidden{{/if}} grid-cols-2 gap-3 border-t border-slate-100 pt-3 lg:grid-cols-4">
+      <div class="col-span-2 lg:col-span-1">
+        <label for="filterProject" class="mb-1 block text-xs font-medium text-slate-500">Dự án</label>
+        <select id="filterProject" name="project" data-autosubmit class="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 sm:text-sm">{{> options options=projectOptions}}</select>
+      </div>
+      <div>
+        <label for="filterType" class="mb-1 block text-xs font-medium text-slate-500">Loại</label>
+        <select id="filterType" name="type" data-autosubmit class="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 sm:text-sm">{{> options options=typeOptions}}</select>
+      </div>
+      <div>
+        <label for="filterTeam" class="mb-1 block text-xs font-medium text-slate-500">Team xử lý</label>
+        <select id="filterTeam" name="team" data-autosubmit class="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 sm:text-sm">{{> options options=teamOptions}}</select>
+      </div>
+      <div>
+        <label for="sortBy" class="mb-1 block text-xs font-medium text-slate-500">Sắp xếp</label>
+        <select id="sortBy" name="sort" data-autosubmit class="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-base focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 sm:text-sm">{{> options options=sortOptions}}</select>
+      </div>
+    </div>
+
+    <!-- Bộ lọc đang áp dụng -->
+    {{#if chips.length}}
+    <div class="mt-3 flex flex-wrap gap-2">
+      {{#each chips}}
+      <span class="inline-flex max-w-full items-center gap-1 rounded-full bg-indigo-50 py-1 pl-3 pr-1 text-xs font-medium text-indigo-700">
+        <span class="truncate">{{label}}: {{value}}</span>
+        <a href="{{href}}" aria-label="Bỏ lọc {{label}}" class="flex h-6 w-6 items-center justify-center rounded-full hover:bg-indigo-100">×</a>
+      </span>
+      {{/each}}
+    </div>
+    {{/if}}
+  </form>
+
+  <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <!-- Tab chế độ xem -->
+    <div class="flex items-center justify-between gap-3 border-b border-slate-200 px-4" role="tablist" aria-label="Chế độ xem">
+      <div class="flex gap-6">
+        {{#each modes}}
+        <a href="{{href}}" role="tab" aria-selected="{{active}}" class="-mb-px border-b-2 py-3 text-sm font-semibold {{#if active}}border-indigo-600 text-indigo-700{{else}}border-transparent text-slate-500 hover:text-slate-800{{/if}}">{{label}}</a>
+        {{/each}}
+      </div>
+      <p class="text-xs text-slate-500">{{resultCount}} backlog</p>
+    </div>
+
+    {{#if board}}
+    <!-- Kanban -->
+    <div id="boardWrap" class="grid grid-cols-1 gap-4 bg-slate-50 p-4 lg:grid-cols-3">
+      {{#each columns}}
+      <section data-col="{{key}}" class="min-h-[12rem] rounded-lg border border-slate-200 bg-slate-100/70 p-3">
+        <h3 class="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
+          <span class="h-2.5 w-2.5 rounded-full {{dot}}"></span>{{label}}
+          <span class="rounded-full bg-white px-2 text-xs font-medium text-slate-500">{{count}}</span>
+        </h3>
+        <div class="space-y-3">{{#each cards}}{{> board_card}}{{else}}<p class="py-6 text-center text-xs text-slate-400">Kéo thả backlog vào đây</p>{{/each}}</div>
+      </section>
+      {{/each}}
+    </div>
+    {{else}}
+    <div class="overflow-x-auto">
+      <table class="w-full min-w-[1900px] table-fixed border-collapse text-left text-sm">
+        <colgroup>
+          <col class="w-44">
+          <col class="w-32">
+          <col class="w-36">
+          <col class="w-40">
+          <col class="w-52">
+          <col class="w-52">
+          <col>
+          <col>
+          <col class="w-48">
+          <col class="w-24">
+        </colgroup>
+        <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th class="px-3 py-3 font-semibold">Dự án</th>
+            <th class="px-3 py-3 font-semibold">Loại</th>
+            <th class="px-3 py-3 font-semibold">Team xử lý</th>
+            <th class="px-3 py-3 font-semibold">Trạng thái</th>
+            <th class="px-3 py-3 font-semibold">Tên lỗi</th>
+            <th class="px-3 py-3 font-semibold">Vị trí lỗi</th>
+            <th class="px-3 py-3 font-semibold">Mô tả lỗi</th>
+            <th class="px-3 py-3 font-semibold">Kết quả mong muốn</th>
+            <th class="px-3 py-3 font-semibold">Ghi chú</th>
+            <th class="px-3 py-3 text-right font-semibold">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          {{#each rows}}{{> backlog_row}}{{else}}{{> table_message colspan=10 message=empty}}{{/each}}
+        </tbody>
+      </table>
+    </div>
+    {{/if}}
+
+    <!-- Phân trang -->
+    {{#if pager.show}}
+    <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-sm text-slate-600">
+      {{#if pager.board}}<span>{{pager.total}} backlog</span>{{else}}
+      <span>Hiển thị {{pager.from}}–{{pager.to}} / {{pager.total}} backlog</span>
+      <div class="flex items-center gap-2">
+        {{#if pager.prevHref}}<a href="{{pager.prevHref}}" class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">‹ Trước</a>{{else}}<span class="cursor-not-allowed rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 opacity-50">‹ Trước</span>{{/if}}
+        <span class="px-1 text-slate-500">Trang {{pager.page}}/{{pager.pages}}</span>
+        {{#if pager.nextHref}}<a href="{{pager.nextHref}}" class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Sau ›</a>{{else}}<span class="cursor-not-allowed rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 opacity-50">Sau ›</span>{{/if}}
+      </div>
+      {{/if}}
+    </div>
+    {{/if}}
+  </div>
+</section>
+
+{{> modal_backlog}}
+{{> modal_project}}

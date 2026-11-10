@@ -1,44 +1,15 @@
 {
   "name": "feedback-backlog",
   "version": "2.0.0",
-  "description": "Ghi nhận feedback / backlog lỗi theo dự án (Express + HBS + Tailwind, CSR) — viết bằng TypeScript",
-  "main": "dist/server.js",
-  "type": "module",
+  "description": "Feedback backlog — monorepo gồm backend (API/MCP), frontend (giao diện) và extension Chrome. Mỗi thư mục là một project độc lập.",
+  "private": true,
   "scripts": {
-    "build": "npm run build:server && npm run build:client && npm run build:extension",
-    "build:server": "tsc -p tsconfig.json",
-    "build:client": "tsc -p tsconfig.client.json",
-    "build:extension": "tsc -p tsconfig.extension.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.extension.json --noEmit",
-    "start": "node dist/server.js",
-    "dev": "npm run build:client && tsx watch server.ts",
-    "create-admin": "tsx scripts/create-admin.ts",
-    "migrate-to-pg": "tsx scripts/migrate-to-pg.ts",
-    "vercel-build": "npm run build:server && npm run build:client"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.32.2",
-    "dotenv": "^18.0.10",
-    "exceljs": "^4.4.0",
-    "express": "^4.19.2",
-    "hbs": "^4.2.0",
-    "multer": "^1.4.5-lts.1",
-    "nodemon": "^3.1.14",
-    "pg": "^8.23.1",
-    "sharp": "^0.35.5",
-    "zod": "^4.6.7"
-  },
-  "devDependencies": {
-    "@electric-sql/pglite": "^0.5.15",
-    "@electric-sql/pglite-socket": "^0.2.18",
-    "@types/chrome": "^0.3.7",
-    "@types/express": "^4.17.25",
-    "@types/hbs": "^4.0.5",
-    "@types/multer": "^1.4.13",
-    "@types/node": "^22.20.5",
-    "@types/pg": "^8.23.1",
-    "prettier": "^3.9.10",
-    "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "install:all": "npm --prefix backend install && npm --prefix frontend install && npm --prefix chrome-extension install",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build && npm --prefix chrome-extension run build",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck && npm --prefix chrome-extension run typecheck",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "start:backend": "npm --prefix backend start",
+    "start:frontend": "npm --prefix frontend start"
   }
 }

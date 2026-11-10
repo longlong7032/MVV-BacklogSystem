@@ -16,7 +16,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
-import type { Database } from '../shared/types.js';
+import type { Database } from '../types.js';
+import { createR2FromEnv } from './r2.js';
+import type { BlobStore } from './r2.js';
 
 /* ---------- Kiểu dữ liệu ---------- */
 
@@ -230,10 +232,12 @@ function createFileDriver({ dataDir, uploadDir, migrate }: FileDriverOptions): D
 interface PgDriverOptions {
   connectionString: string;
   migrate: Migrate;
+  /** Kho file ngoài (Cloudflare R2). Có thì file lưu ở đó; không có thì lưu trong bảng `files` (bytea). */
+  blobs?: BlobStore | null;
 }
 
-/** Driver lưu dữ liệu vào bảng `app_state` (jsonb) và file vào bảng `files` (bytea). */
-function createPgDriver({ connectionString, migrate }: PgDriverOptions): Driver {
+/** Driver lưu dữ liệu vào bảng `app_state` (jsonb) và file vào R2 (nếu có) hoặc bảng `files` (bytea). */
+function createPgDriver({ connectionString, migrate, blobs = null }: PgDriverOptions): Driver {
   const { Pool } = pg;
   // PG_POOL_MAX: số kết nối tối đa mỗi instance (mặc định 4; serverless nên để nhỏ vì nhiều instance chạy song song)
   const max = Number(process.env.PG_POOL_MAX) || 4;
@@ -309,6 +313,10 @@ function createPgDriver({ connectionString, migrate }: PgDriverOptions): Driver 
               // File tải lên cùng transaction với dữ liệu: lỗi ở đâu thì hủy tất cả
               for (const u of store.uploads) {
                 if (store.deletes.has(u.name)) continue;
+                if (blobs) {
+                  await blobs.put(u); // lỗi R2 -> ném ra -> ROLLBACK, dữ liệu không bị lệch với file
+                  continue;
+                }
                 await client.query(
                   'INSERT INTO files (name, mime, size, original_name, data) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (name) DO NOTHING',
                   [u.name, u.mime, u.size, u.originalname || null, u.buffer]
@@ -323,6 +331,8 @@ function createPgDriver({ connectionString, migrate }: PgDriverOptions): Driver 
               await client.query('COMMIT');
               finished = true;
               client.release();
+              // Xóa trên R2 sau khi DB đã commit (lỗi xóa chỉ để lại file mồ côi, không ảnh hưởng dữ liệu)
+              if (blobs && store.deletes.size) await blobs.remove([...store.deletes].map((n) => path.basename(n)));
             } catch (e) {
               await rollbackAndRelease();
               throw e;
@@ -337,6 +347,11 @@ function createPgDriver({ connectionString, migrate }: PgDriverOptions): Driver 
       }
     },
     async getFile(name) {
+      // Ưu tiên R2; file cũ chưa chuyển sang R2 vẫn đọc được từ bảng `files`
+      if (blobs) {
+        const file = await blobs.get(path.basename(name));
+        if (file) return file;
+      }
       const r = await pool.query<{ mime: string; data: Buffer }>('SELECT mime, data FROM files WHERE name = $1', [path.basename(name)]);
       return r.rows[0] ? { buffer: r.rows[0].data, mime: r.rows[0].mime } : null;
     },
@@ -376,7 +391,9 @@ interface DbContextOptions {
  */
 function createStore({ migrate, dataDir, uploadDir }: StoreOptions) {
   const url = resolveDatabaseUrl();
-  const driver = url ? createPgDriver({ connectionString: url, migrate }) : createFileDriver({ dataDir, uploadDir, migrate });
+  const driver = url
+    ? createPgDriver({ connectionString: url, migrate, blobs: createR2FromEnv() })
+    : createFileDriver({ dataDir, uploadDir, migrate });
 
   /** Dựng trạng thái phiên từ ngữ cảnh driver vừa mở. */
   const makeStore = (ctx: DriverContext, locked: boolean): StoreState => ({

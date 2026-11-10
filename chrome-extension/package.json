@@ -1,0 +1,14 @@
+{
+  "name": "feedback-backlog-extension",
+  "version": "1.0.0",
+  "description": "Extension Chrome báo lỗi nhanh gửi lên Feedback backlog (gọi API qua địa chỉ frontend/backend do người dùng cấu hình).",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.7",
+    "typescript": "^7.0.2"
+  }
+}

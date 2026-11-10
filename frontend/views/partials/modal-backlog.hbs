@@ -1,0 +1,132 @@
+<!-- Form thêm / sửa backlog (mobile-first: bottom sheet, thanh nút luôn hiện) -->
+<div id="modal" data-modal class="fixed inset-0 z-40 hidden items-end justify-center bg-slate-900/50 sm:items-center sm:p-4">
+  <form id="form" data-next-stt="{{form.nextStt}}" data-current-project="{{form.currentProject}}" data-current-team="{{form.currentTeam}}" class="flex max-h-[95dvh] w-full max-w-2xl flex-col rounded-t-2xl bg-white shadow-xl sm:max-h-[92vh] sm:rounded-lg" novalidate>
+    <div class="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-5 sm:py-4">
+      <h2 id="modalTitle" class="text-base font-semibold text-slate-900">Thêm backlog</h2>
+      <button type="button" data-close class="-mr-2 rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Đóng">
+        <svg class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 0 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z"/></svg>
+      </button>
+    </div>
+
+    <div class="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5 sm:py-5">
+
+      <!-- Phân loại: thu gọn khi đã nhớ lựa chọn lần trước -->
+      <details id="fMeta" class="group rounded-lg border border-slate-200 bg-slate-50">
+        <summary class="flex cursor-pointer list-none items-center [&::-webkit-details-marker]:hidden justify-between gap-3 px-3 py-3">
+          <span id="metaSummary" class="line-clamp-2 min-w-0 flex-1 break-words text-sm font-medium text-slate-700"></span>
+          <span class="shrink-0 text-xs font-medium text-indigo-600 group-open:hidden">Đổi</span>
+          <span class="hidden shrink-0 text-xs font-medium text-indigo-600 group-open:inline">Thu gọn</span>
+        </summary>
+        <div class="space-y-4 border-t border-slate-200 px-3 py-4">
+          <div>
+            <div class="mb-1.5 flex items-center justify-between">
+              <label for="fProject" class="text-sm font-medium text-slate-700">Dự án</label>
+              <button type="button" id="btnQuickProject" class="py-1 text-sm font-medium text-indigo-600 hover:text-indigo-800">+ Dự án mới</button>
+            </div>
+            <select id="fProject" name="project_id" required
+              class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-base focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 sm:text-sm"><option value="">— Chọn dự án —</option>{{> options options=form.projects}}</select>
+            <p id="sttHint" class="mt-1 text-xs text-slate-500">STT được tự động đánh số theo từng dự án.</p>
+          </div>
+
+          <div>
+            <p class="mb-1.5 text-sm font-medium text-slate-700">Loại</p>
+            <div id="typeChips" class="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">{{#each form.types}}{{> chip attr="data-chip-type" value=this label=this extra="shrink-0"}}{{/each}}</div>
+            <input id="fType" name="type" list="typeList" maxlength="60" autocomplete="off" placeholder="Hoặc nhập loại khác..."
+              class="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-base focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 sm:text-sm">
+            <datalist id="typeList">{{#each form.types}}<option value="{{this}}"></option>{{/each}}</datalist>
+          </div>
+
+          <div>
+            <p class="mb-1.5 text-sm font-medium text-slate-700">Team xử lý</p>
+            <div id="teamChips" class="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">{{> chip attr="data-chip-team" value="" label="Chưa phân công" extra="shrink-0"}}{{#each form.teams}}{{> chip attr="data-chip-team" value=id label=name extra="shrink-0"}}{{/each}}</div>
+            <select id="fTeam" name="team_id" class="hidden" tabindex="-1" aria-hidden="true"><option value=""></option>{{#each form.teams}}<option value="{{id}}">{{name}}</option>{{/each}}</select>
+          </div>
+
+          <div>
+            <p class="mb-1.5 text-sm font-medium text-slate-700">Trạng thái</p>
+            <div id="statusChips" class="grid grid-cols-3 gap-2">{{#each form.statuses}}{{> chip attr="data-chip-status" value=key label=label extra="!rounded-lg"}}{{/each}}</div>
+            <select id="fStatus" name="status" class="hidden" tabindex="-1" aria-hidden="true">{{#each form.statuses}}<option value="{{key}}">{{label}}</option>{{/each}}</select>
+          </div>
+        </div>
+      </details>
+
+      <div>
+        <label for="fTitle" class="mb-1.5 block text-sm font-medium text-slate-700">Tên lỗi</label>
+        <input id="fTitle" name="title" maxlength="200" autocomplete="off" enterkeyhint="next" placeholder="Tóm tắt ngắn gọn lỗi"
+          class="w-full rounded-lg border border-slate-300 px-3 py-3 text-base focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 sm:py-2.5 sm:text-sm">
+      </div>
+
+      <section data-zone="location" class="-m-2 rounded-lg border border-transparent p-2">
+        <label for="fLocationUrl" class="mb-1.5 block text-sm font-medium text-slate-700">Vị trí lỗi <span class="font-normal text-slate-500">(URL hoặc ảnh)</span></label>
+        <input id="fLocationUrl" name="location_url" type="text" inputmode="url" placeholder="https://..." autocomplete="off" autocapitalize="off"
+          class="w-full rounded-lg border border-slate-300 px-3 py-3 text-base focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 sm:py-2.5 sm:text-sm">
+        <div data-dropzone="location" class="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-2">
+          <button type="button" data-pick="location" class="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-100 sm:min-h-0 sm:py-1.5">
+            <span aria-hidden="true">📷</span> Thêm ảnh
+          </button>
+          <span class="hidden text-sm text-slate-500 sm:inline">hoặc kéo thả / dán ảnh (Ctrl+V)</span>
+          <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" class="hidden" data-input="location">
+          <div data-preview="location" class="flex w-full flex-wrap gap-2 empty:hidden"></div>
+        </div>
+        <div id="fHarBox" class="mt-2 hidden items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+          <a id="fHarLink" href="#" download class="truncate text-indigo-600 underline hover:text-indigo-800"></a>
+          <label class="flex shrink-0 items-center gap-1.5 text-slate-600">
+            <input type="checkbox" id="fRemoveHar" class="h-4 w-4 rounded border-slate-300"> Gỡ HAR
+          </label>
+        </div>
+      </section>
+
+      <section data-zone="bug" class="-m-2 rounded-lg border border-transparent p-2">
+        <label for="fBugText" class="mb-1.5 block text-sm font-medium text-slate-700">Mô tả lỗi <span class="font-normal text-slate-500">(ảnh + text)</span></label>
+        <textarea id="fBugText" name="bug_text" rows="3"
+          class="w-full rounded-lg border border-slate-300 px-3 py-3 text-base focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 sm:py-2.5 sm:text-sm"></textarea>
+        <div data-dropzone="bug" class="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-2">
+          <button type="button" data-pick="bug" class="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-100 sm:min-h-0 sm:py-1.5">
+            <span aria-hidden="true">📷</span> Thêm ảnh
+          </button>
+          <span class="hidden text-sm text-slate-500 sm:inline">hoặc kéo thả / dán ảnh (Ctrl+V)</span>
+          <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple class="hidden" data-input="bug">
+          <div data-preview="bug" class="flex w-full flex-wrap gap-2 empty:hidden"></div>
+        </div>
+      </section>
+
+      <section data-zone="expected" class="-m-2 rounded-lg border border-transparent p-2">
+        <label for="fExpectedText" class="mb-1.5 block text-sm font-medium text-slate-700">Kết quả mong muốn <span class="font-normal text-slate-500">(ảnh + text)</span></label>
+        <textarea id="fExpectedText" name="expected_text" rows="2"
+          class="w-full rounded-lg border border-slate-300 px-3 py-3 text-base focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 sm:py-2.5 sm:text-sm"></textarea>
+        <div data-dropzone="expected" class="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-2">
+          <button type="button" data-pick="expected" class="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-100 sm:min-h-0 sm:py-1.5">
+            <span aria-hidden="true">📷</span> Thêm ảnh
+          </button>
+          <span class="hidden text-sm text-slate-500 sm:inline">hoặc kéo thả / dán ảnh (Ctrl+V)</span>
+          <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple class="hidden" data-input="expected">
+          <div data-preview="expected" class="flex w-full flex-wrap gap-2 empty:hidden"></div>
+        </div>
+      </section>
+
+      <details id="fNoteBox" class="group">
+        <summary class="cursor-pointer list-none py-1 [&::-webkit-details-marker]:hidden text-sm font-medium text-indigo-600 hover:text-indigo-800 group-open:hidden">+ Thêm ghi chú</summary>
+        <label for="fNote" class="mb-1.5 block text-sm font-medium text-slate-700">Ghi chú <span class="font-normal text-slate-500">(nếu có)</span></label>
+        <textarea id="fNote" name="note_text" rows="2"
+          class="w-full rounded-lg border border-slate-300 px-3 py-3 text-base focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 sm:py-2.5 sm:text-sm"></textarea>
+      </details>
+
+      <p id="formError" class="hidden rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+    </div>
+
+    <!-- Thanh nút luôn hiển thị ở đáy -->
+    <div class="flex shrink-0 gap-2 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:justify-end sm:bg-slate-50 sm:px-5">
+      <button id="btnSave" type="submit" class="order-3 min-h-[48px] flex-1 rounded-lg bg-indigo-600 px-5 text-base font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:flex-none sm:py-2 sm:text-sm sm:font-medium">Lưu</button>
+      <button id="btnSaveNew" type="submit" class="order-2 min-h-[48px] flex-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-0 sm:flex-none sm:py-2 sm:font-medium">Lưu &amp; thêm tiếp</button>
+      <button type="button" data-close class="order-1 hidden rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 sm:inline-flex">Hủy</button>
+    </div>
+  </form>
+</div>
+
+<!-- Mẫu ảnh xem trước (JS nhân bản, không tự dựng HTML) -->
+<template id="tplPreview">
+  <div class="relative h-20 w-20">
+    <img src="" data-zoom="" alt="" class="h-20 w-20 cursor-zoom-in rounded border border-slate-200 object-cover">
+    <button type="button" data-remove="" data-index="" aria-label="Xóa ảnh" class="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs font-bold leading-none text-white hover:bg-red-700">×</button>
+  </div>
+</template>

@@ -1,0 +1,31 @@
+<div class="space-y-6">
+  <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    {{#each cards}}
+    <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div class="flex items-center justify-between">
+        <p class="text-sm font-medium text-slate-500">{{label}}</p>
+        <span class="h-2.5 w-2.5 rounded-full {{accent}}"></span>
+      </div>
+      <p class="mt-2 text-3xl font-semibold text-slate-900">{{value}}</p>
+      <p class="mt-1 text-xs text-slate-500">{{sub}}</p>
+    </div>
+    {{/each}}
+  </div>
+
+  <div class="grid gap-6 xl:grid-cols-2">
+    <div class="rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+        <h2 class="text-sm font-semibold text-slate-900">Khối lượng theo team</h2>
+        <a href="/teams" class="text-xs font-medium text-indigo-600 hover:text-indigo-800">Quản lý team</a>
+      </div>
+      <div class="divide-y divide-slate-100">{{> load_rows rows=teamRows empty="Chưa có team nào."}}</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+        <h2 class="text-sm font-semibold text-slate-900">Tiến độ theo dự án</h2>
+        <a href="/projects" class="text-xs font-medium text-indigo-600 hover:text-indigo-800">Quản lý dự án</a>
+      </div>
+      <div class="divide-y divide-slate-100">{{> load_rows rows=projectRows empty="Chưa có dự án nào."}}</div>
+    </div>
+  </div>
+</div>

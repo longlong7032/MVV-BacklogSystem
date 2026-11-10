@@ -1,0 +1,21 @@
+{
+  // Extension Chrome: src/*.ts  ->  *.js cùng thư mục (nạp bằng type="module")
+  "compilerOptions": {
+    "target": "ES2022",
+    "strict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "moduleDetection": "force",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["chrome"],
+    "rootDir": "src",
+    "outDir": "."
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": [] // mặc định tsc loại thư mục outDir (chứa cả src/) khỏi include nên phải khai báo rỗng
+}

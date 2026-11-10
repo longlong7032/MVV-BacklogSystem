@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}} · Feedback backlog</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body data-tab="{{tab}}" class="min-h-screen bg-slate-100 text-slate-800 antialiased">
+<div class="flex min-h-screen">
+  <!-- ================= SIDEBAR ================= -->
+  <div id="sidebarBackdrop" class="fixed inset-0 z-30 hidden bg-slate-900/50 lg:hidden"></div>
+  <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 flex w-64 -translate-x-full flex-col bg-slate-900 text-slate-300 transition-transform lg:translate-x-0">
+    <div class="flex h-16 items-center gap-3 border-b border-slate-800 px-5">
+      <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-500 text-white">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H9l-4 3v-3a2 2 0 0 1-2-2V5Zm4 1.5a.75.75 0 0 0 0 1.5h6a.75.75 0 0 0 0-1.5H7ZM7 9a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5H7Z" clip-rule="evenodd"/></svg>
+      </span>
+      <div class="leading-tight">
+        <p class="text-sm font-semibold text-white">Feedback Portal</p>
+        <p class="text-xs text-slate-400">Quản lý backlog lỗi</p>
+      </div>
+    </div>
+
+    <nav class="flex-1 space-y-1 overflow-y-auto px-3 py-4 text-sm font-medium" aria-label="Điều hướng">
+      <p class="px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">Tổng quan</p>
+      <a href="/dashboard" class="flex items-center gap-3 rounded-md px-3 py-2 {{navClass tab "dashboard"}}"{{#if (eq tab "dashboard")}} aria-current="page"{{/if}}>
+        <svg class="h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M3 4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4Zm8 0a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V4ZM3 13a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3Zm8-3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-6Z"/></svg>
+        Dashboard
+      </a>
+      <p class="px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wider text-slate-500">Quản lý</p>
+      <a href="/backlog" class="flex items-center gap-3 rounded-md px-3 py-2 {{navClass tab "backlog"}}"{{#if (eq tab "backlog")}} aria-current="page"{{/if}}>
+        <svg class="h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7.414A2 2 0 0 0 15.414 6L12 2.586A2 2 0 0 0 10.586 2H6Zm2 8a.75.75 0 0 0 0 1.5h4A.75.75 0 0 0 12 10H8Zm0 3a.75.75 0 0 0 0 1.5h4a.75.75 0 0 0 0-1.5H8Z" clip-rule="evenodd"/></svg>
+        Backlog
+      </a>
+      <a href="/projects" class="flex items-center gap-3 rounded-md px-3 py-2 {{navClass tab "projects"}}"{{#if (eq tab "projects")}} aria-current="page"{{/if}}>
+        <svg class="h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M2 6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6Z"/></svg>
+        Dự án
+      </a>
+      <a href="/teams" class="flex items-center gap-3 rounded-md px-3 py-2 {{navClass tab "teams"}}"{{#if (eq tab "teams")}} aria-current="page"{{/if}}>
+        <svg class="h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M7 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm6 1a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM1 16a6 6 0 0 1 12 0v1H1v-1Zm13 1v-1a7.97 7.97 0 0 0-1.5-4.67A5 5 0 0 1 19 16v1h-5Z"/></svg>
+        Team xử lý
+      </a>
+      <a href="/users" class="flex items-center gap-3 rounded-md px-3 py-2 {{navClass tab "users"}}"{{#if (eq tab "users")}} aria-current="page"{{/if}}>
+        <svg class="h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M10 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-7 8a7 7 0 0 1 14 0v1H3v-1Z"/></svg>
+        Người dùng
+      </a>
+      <p class="px-3 pb-1 pt-4 text-xs font-semibold uppercase tracking-wider text-slate-500">Tích hợp</p>
+      <a href="/mcp-guide" class="flex items-center gap-3 rounded-md px-3 py-2 {{navClass tab "mcp"}}"{{#if (eq tab "mcp")}} aria-current="page"{{/if}}>
+        <svg class="h-5 w-5 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.316 3.051a1 1 0 0 1 .633 1.265l-4 12a1 1 0 1 1-1.898-.632l4-12a1 1 0 0 1 1.265-.633ZM5.707 6.293a1 1 0 0 1 0 1.414L3.414 10l2.293 2.293a1 1 0 1 1-1.414 1.414l-3-3a1 1 0 0 1 0-1.414l3-3a1 1 0 0 1 1.414 0Zm8.586 0a1 1 0 0 1 1.414 0l3 3a1 1 0 0 1 0 1.414l-3 3a1 1 0 1 1-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 0 1 0-1.414Z" clip-rule="evenodd"/></svg>
+        Kết nối MCP
+      </a>
+    </nav>
+
+    <div class="border-t border-slate-800 px-5 py-3 text-xs text-slate-500">Feedback backlog · v{{version}}</div>
+  </aside>
+
+  <!-- ================= MAIN COLUMN ================= -->
+  <div class="flex min-w-0 flex-1 flex-col lg:pl-64">
+    <header class="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-slate-200 bg-white px-4 sm:px-6">
+      <button id="btnMenu" type="button" class="rounded-md p-2 text-slate-500 hover:bg-slate-100 lg:hidden" aria-label="Mở menu">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 5.75A.75.75 0 0 1 3.75 5h12.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 5.75Zm0 4.25a.75.75 0 0 1 .75-.75h12.5a.75.75 0 0 1 0 1.5H3.75A.75.75 0 0 1 3 10Zm.75 3.5a.75.75 0 0 0 0 1.5h12.5a.75.75 0 0 0 0-1.5H3.75Z" clip-rule="evenodd"/></svg>
+      </button>
+      <div class="min-w-0">
+        <p class="text-xs text-slate-500">Feedback Portal / <span>{{title}}</span></p>
+        <h1 class="truncate text-lg font-semibold leading-tight text-slate-900">{{title}}</h1>
+      </div>
+    </header>
+
+    <div class="flex-1 px-4 py-6 sm:px-6">
+{{{body}}}
+    </div>
+  </div>
+</div>
+
+<!-- Thông báo nhanh -->
+<div id="toast" class="pointer-events-none fixed inset-x-0 bottom-24 z-[60] hidden justify-center px-4 sm:bottom-6">
+  <div id="toastMsg" class="rounded-full bg-slate-900 px-4 py-2 text-sm text-white shadow-lg"></div>
+</div>
+
+<!-- Xem ảnh lớn -->
+<div id="lightbox" class="fixed inset-0 z-50 hidden cursor-zoom-out items-center justify-center bg-slate-900/80 p-4">
+  <img id="lightboxImg" alt="" class="max-h-full max-w-full rounded shadow-2xl">
+</div>
+
+<script type="module" src="/public/js/app.js"></script>
+</body>
+
+</html>

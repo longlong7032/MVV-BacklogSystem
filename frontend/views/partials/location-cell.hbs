@@ -1,0 +1,5 @@
+{{#if empty}}{{> dash}}{{else}}
+{{#if url}}{{#if isHttp}}<a href="{{url}}" target="_blank" rel="noopener noreferrer" class="break-all text-indigo-600 underline hover:text-indigo-800">{{url}}</a>{{else}}<span class="break-all">{{url}}</span>{{/if}}{{/if}}
+{{#if image}}<div class="mt-2">{{> thumb src=image}}</div>{{/if}}
+{{#if har}}<div>{{> har_link har}}</div>{{/if}}
+{{/if}}

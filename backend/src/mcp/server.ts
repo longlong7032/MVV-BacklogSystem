@@ -17,7 +17,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { findRoot } from '../lib/paths.js';
-import type { Feedback, FeedbackStatus, Har, HarEntry, Project, Team } from '../shared/types.js';
+import type { Feedback, FeedbackStatus, Har, HarEntry, Project, Team } from '../types.js';
 
 // Đọc version từ package.json ở thư mục gốc (đúng cả khi chạy từ nguồn lẫn từ dist/)
 const { version } = createRequire(import.meta.url)(path.join(findRoot(import.meta.url), 'package.json')) as { version: string };

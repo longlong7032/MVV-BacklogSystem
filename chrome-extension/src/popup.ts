@@ -5,7 +5,7 @@
  * -> (tuỳ chọn) lấy file HAR từ background/devtools -> gửi `POST /api/feedbacks` tới server backlog.
  * Biên dịch từ chrome-extension/src/popup.ts ra chrome-extension/popup.js (`npm run build:extension`).
  */
-import type { Feedback, Har, HarHeader, Project } from '../../shared/types.js';
+import type { Feedback, Har, HarHeader, Project } from './types.js';
 
 /* ---------- Kiểu dữ liệu ---------- */
 
@@ -305,7 +305,7 @@ async function submit(event: SubmitEvent): Promise<void> {
     showSuccess(
       `Đã tạo backlog <b>#${esc(item.stt)}</b> · ${esc(projectName)}` +
         (item.har ? ' (kèm HAR)' : '') +
-        ` — <a href="${esc(state.server)}/#/backlog" target="_blank">xem</a>`
+        ` — <a href="${esc(state.server)}/backlog" target="_blank">xem</a>`
     );
   } catch (e) {
     showError((e as Error).message);
@@ -330,7 +330,7 @@ async function init(): Promise<void> {
   state.server = normalizeServer(stored.server);
 
   $<Field>('serverUrl').value = state.server;
-  $<HTMLAnchorElement>('openBacklog').href = state.server + '/#/backlog';
+  $<HTMLAnchorElement>('openBacklog').href = state.server + '/backlog';
   $('pageTitle').textContent = tab.title || tab.url || '';
   $('pageTitle').title = tab.url || '';
   $<Field>('locationUrl').value = tab.url || '';
@@ -385,7 +385,7 @@ $('clearLog').onclick = async () => {
 $('saveServer').onclick = async () => {
   state.server = normalizeServer($<Field>('serverUrl').value);
   $<Field>('serverUrl').value = state.server;
-  $<HTMLAnchorElement>('openBacklog').href = state.server + '/#/backlog';
+  $<HTMLAnchorElement>('openBacklog').href = state.server + '/backlog';
   await chrome.storage.local.set({ server: state.server });
   await loadProjects($<HTMLSelectElement>('project').value);
 };

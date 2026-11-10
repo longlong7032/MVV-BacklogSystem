@@ -1,5 +1,5 @@
 {
-  // Cấu hình TypeScript dùng chung cho cả server, client và extension.
+  // Backend (Node.js): src/  ->  biên dịch ra dist/
   "compilerOptions": {
     "target": "ES2022",
     "strict": true, // bật toàn bộ kiểm tra chặt (noImplicitAny, strictNullChecks, ...)
@@ -8,7 +8,13 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "moduleDetection": "force", // mọi file đều là module -> không đụng tên biến toàn cục giữa các file
-    "sourceMap": false
-  }
+    "moduleDetection": "force", // mọi file đều là module
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts"]
 }

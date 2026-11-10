@@ -1,0 +1,125 @@
+<section id="viewMcp">
+  <div class="mx-auto max-w-4xl space-y-6">
+
+    <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 class="text-base font-semibold text-slate-900">Cho dev lấy backlog về sửa lỗi bằng MCP</h2>
+      <p class="mt-1 text-sm text-slate-600">
+        MCP (Model Context Protocol) cho phép công cụ AI của dev (Claude Code, Cursor, VS Code...) đọc trực tiếp backlog trên hệ thống này:
+        xem mô tả lỗi, ảnh, phân tích file HAR rồi sửa code và cập nhật trạng thái — không cần copy / paste thủ công.
+      </p>
+
+      <div class="mt-4 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+        <div>
+          <p class="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">MCP endpoint</p>
+          <div class="flex items-center gap-2 rounded-md border border-slate-300 bg-slate-50 px-3 py-2">
+            <code id="mcpUrl" class="min-w-0 flex-1 truncate text-sm text-slate-800">{{url}}</code>
+            <button type="button" data-copy-target="#mcpUrl" class="shrink-0 rounded border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100">Sao chép</button>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 text-xs font-medium">{{#each badges}}<span class="rounded-full px-2.5 py-1 {{cls}}">{{label}}</span>{{/each}}</div>
+      </div>
+    </div>
+
+    <!-- Bước 1 -->
+    <div class="rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div class="flex items-center gap-3 border-b border-slate-200 px-5 py-4">
+        <span class="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-xs font-semibold text-white">1</span>
+        <h3 class="text-sm font-semibold text-slate-900">Lấy token cá nhân từ quản trị viên</h3>
+      </div>
+      <div class="px-5 py-4 text-sm text-slate-600">{{> mcp_token_note}}</div>
+    </div>
+
+    <!-- Bước 2 -->
+    <div class="rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div class="flex items-center gap-3 border-b border-slate-200 px-5 py-4">
+        <span class="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-xs font-semibold text-white">2</span>
+        <h3 class="text-sm font-semibold text-slate-900">Thêm vào công cụ của bạn</h3>
+      </div>
+      <div class="px-5 py-4">
+        <div class="mb-3 flex flex-wrap gap-1 border-b border-slate-200" role="tablist">
+          {{#each tabs}}
+          <button type="button" role="tab" data-mcp-tab="{{key}}" aria-selected="{{active}}" class="-mb-px border-b-2 px-3 py-2 text-sm font-medium border-transparent text-slate-500 hover:text-slate-800 aria-selected:border-indigo-600 aria-selected:text-indigo-700 aria-selected:hover:text-indigo-700">{{label}}</button>
+          {{/each}}
+        </div>
+        {{#each tabs}}<p data-mcp-hint="{{key}}" class="mb-3 text-sm text-slate-600{{#unless active}} hidden{{/unless}}">{{hint}}</p>{{/each}}
+        <div class="relative">
+          <button type="button" data-copy-active-tab class="absolute right-2 top-2 rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs font-medium text-slate-200 hover:bg-slate-700">Sao chép</button>
+          {{#each tabs}}<pre data-mcp-code="{{key}}" class="overflow-x-auto rounded-md bg-slate-900 p-4 pr-24 text-sm leading-relaxed text-slate-100{{#unless active}} hidden{{/unless}}"><code>{{code}}</code></pre>{{/each}}
+        </div>
+      </div>
+    </div>
+
+    <!-- Bước 3 -->
+    <div class="rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div class="flex items-center gap-3 border-b border-slate-200 px-5 py-4">
+        <span class="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-xs font-semibold text-white">3</span>
+        <h3 class="text-sm font-semibold text-slate-900">Kiểm tra kết nối</h3>
+      </div>
+      <div class="space-y-3 px-5 py-4 text-sm text-slate-600">
+        <p>Trong Claude Code gõ <code class="rounded bg-slate-100 px-1.5 py-0.5 text-slate-800">/mcp</code> (hoặc chạy <code class="rounded bg-slate-100 px-1.5 py-0.5 text-slate-800">claude mcp list</code>) — <b>feedback-backlog</b> phải ở trạng thái connected. Hoặc kiểm tra bằng curl:</p>
+        <div class="relative">
+          <button type="button" data-copy-target="#mcpCurl" class="absolute right-2 top-2 rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs font-medium text-slate-200 hover:bg-slate-700">Sao chép</button>
+          <pre class="overflow-x-auto rounded-md bg-slate-900 p-4 pr-24 text-sm leading-relaxed text-slate-100"><code id="mcpCurl">{{curl}}</code></pre>
+        </div>
+        <p>Kết quả trả về danh sách 7 tool bên dưới là thành công. Lỗi <b>401</b> = thiếu / sai token, <b>403</b> = tài khoản bị vô hiệu hóa.</p>
+      </div>
+    </div>
+
+    <!-- Tool -->
+    <div class="rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div class="border-b border-slate-200 px-5 py-4">
+        <h3 class="text-sm font-semibold text-slate-900">Các tool có sẵn</h3>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full min-w-[560px] border-collapse text-left text-sm">
+          <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr><th class="w-56 px-5 py-2.5 font-semibold">Tool</th><th class="px-5 py-2.5 font-semibold">Chức năng</th><th class="w-20 px-5 py-2.5 font-semibold">Loại</th></tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr><td class="px-5 py-2.5"><code class="text-slate-800">list_projects</code></td><td class="px-5 py-2.5 text-slate-600">Danh sách dự án + số backlog theo trạng thái</td><td class="px-5 py-2.5 text-slate-500">Đọc</td></tr>
+            <tr><td class="px-5 py-2.5"><code class="text-slate-800">list_teams</code></td><td class="px-5 py-2.5 text-slate-600">Danh sách team xử lý + số việc đang mở</td><td class="px-5 py-2.5 text-slate-500">Đọc</td></tr>
+            <tr><td class="px-5 py-2.5"><code class="text-slate-800">list_backlog</code></td><td class="px-5 py-2.5 text-slate-600">Liệt kê backlog, lọc theo dự án / team / trạng thái / từ khóa</td><td class="px-5 py-2.5 text-slate-500">Đọc</td></tr>
+            <tr><td class="px-5 py-2.5"><code class="text-slate-800">get_backlog</code></td><td class="px-5 py-2.5 text-slate-600">Chi tiết một backlog: mô tả, kết quả mong muốn, URL, ảnh (xem được trực tiếp), HAR</td><td class="px-5 py-2.5 text-slate-500">Đọc</td></tr>
+            <tr><td class="px-5 py-2.5"><code class="text-slate-800">analyze_har</code></td><td class="px-5 py-2.5 text-slate-600">Phân tích HAR: request lỗi 4xx/5xx, request chậm, request / response body</td><td class="px-5 py-2.5 text-slate-500">Đọc</td></tr>
+            <tr><td class="px-5 py-2.5"><code class="text-slate-800">update_backlog_status</code></td><td class="px-5 py-2.5 text-slate-600">Đổi trạng thái: chưa làm / đang làm / đã hoàn thành</td><td class="px-5 py-2.5 text-amber-700">Ghi</td></tr>
+            <tr><td class="px-5 py-2.5"><code class="text-slate-800">assign_backlog_team</code></td><td class="px-5 py-2.5 text-slate-600">Giao backlog cho team</td><td class="px-5 py-2.5 text-amber-700">Ghi</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Prompt mẫu -->
+    <div class="rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div class="border-b border-slate-200 px-5 py-4">
+        <h3 class="text-sm font-semibold text-slate-900">Prompt mẫu</h3>
+      </div>
+      <ul class="divide-y divide-slate-100 text-sm text-slate-700">
+        <li class="flex items-start gap-3 px-5 py-3"><span class="min-w-0 flex-1" data-prompt>Liệt kê các backlog chưa làm của team kĩ thuật.</span><button type="button" data-copy-prompt class="shrink-0 text-xs font-medium text-indigo-600 hover:text-indigo-800">Sao chép</button></li>
+        <li class="flex items-start gap-3 px-5 py-3"><span class="min-w-0 flex-1" data-prompt>Xem backlog #3 dự án demo (kèm ảnh), tìm nguyên nhân trong code và sửa. Bắt đầu thì chuyển sang "đang làm", sửa xong chuyển "đã hoàn thành".</span><button type="button" data-copy-prompt class="shrink-0 text-xs font-medium text-indigo-600 hover:text-indigo-800">Sao chép</button></li>
+        <li class="flex items-start gap-3 px-5 py-3"><span class="min-w-0 flex-1" data-prompt>Backlog #5 dự án demo có file HAR, phân tích xem API nào lỗi rồi đề xuất cách sửa.</span><button type="button" data-copy-prompt class="shrink-0 text-xs font-medium text-indigo-600 hover:text-indigo-800">Sao chép</button></li>
+      </ul>
+    </div>
+
+    <!-- Quản trị -->
+    <details class="rounded-lg border border-slate-200 bg-white shadow-sm">
+      <summary class="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-900">Dành cho quản trị viên (cấu hình server)</summary>
+      <div class="space-y-3 border-t border-slate-200 px-5 py-4 text-sm text-slate-600">
+        <p>MCP chạy ngay trong web app tại <code class="rounded bg-slate-100 px-1.5 py-0.5 text-slate-800">POST /mcp</code> — không cần cài thêm gì trên máy dev. Mỗi người dùng được cấp một <b>token cá nhân</b> (trang Người dùng) — có thể thu hồi / cấp lại bất cứ lúc nào, đặt quyền chỉ đọc / đọc + ghi / quản trị riêng. Quản trị viên cũng đăng nhập trang Người dùng bằng token cá nhân của mình. Cấu hình bằng biến môi trường khi chạy server:</p>
+        <table class="w-full border-collapse text-left">
+          <tbody class="divide-y divide-slate-100">
+            <tr><td class="w-44 py-2 pr-3 align-top"><code class="text-slate-800">npm run create-admin</code></td><td class="py-2">Tạo quản trị viên đầu tiên (hoặc cấp lại token cho admin bị mất): <code>npm run create-admin -- "Họ tên" email@congty.vn</code>. Chạy trên máy chủ — ai có quyền shell mới tạo được admin. Không còn khóa dùng chung.</td></tr>
+            <tr><td class="py-2 pr-3 align-top"><code class="text-slate-800">MCP_READONLY=1</code></td><td class="py-2">Ép toàn server chỉ đọc, bất kể quyền của từng người dùng.</td></tr>
+            <tr><td class="py-2 pr-3 align-top"><code class="text-slate-800">PUBLIC_URL</code></td><td class="py-2">Địa chỉ công khai của web app (vd <code>https://backlog.congty.vn</code>), dùng dựng link ảnh / HAR. Bỏ trống thì tự lấy theo request.</td></tr>
+            <tr><td class="py-2 pr-3 align-top"><code class="text-slate-800">TRUST_PROXY</code></td><td class="py-2">Số proxy phía trước app (mặc định 1 = nginx). <b>Không có proxy thì đặt 0</b> để IP không bị giả mạo qua <code>X-Forwarded-For</code>.</td></tr>
+            <tr><td class="py-2 pr-3 align-top"><code class="text-slate-800">DEV_NO_AUTH=1</code></td><td class="py-2">Chỉ dùng khi chạy local để thử: bỏ xác thực trang Người dùng và <code>/mcp</code>. <b>Không bao giờ bật khi deploy.</b></td></tr>
+          </tbody>
+        </table>
+        <p>Chạy sau nginx / load balancer: bật HTTPS, chuyển tiếp header <code>Host</code>, <code>X-Forwarded-Proto</code> và đặt <code>proxy_buffering off;</code> cho location <code>/mcp</code>.</p>
+        <p><b>Bảo vệ sẵn có:</b> giới hạn 60 request/phút/IP và 300 request/phút toàn server; sai token quá 8 lần → khóa IP 15 phút; tối đa 8 request MCP chạy đồng thời; timeout 60s; giới hạn dung lượng HAR (20MB) và ảnh (5MB/ảnh) khi đọc. Token lưu dạng băm, không xem lại được.</p>
+        <p class="rounded-md bg-amber-50 px-3 py-2 text-amber-800">Lưu ý: token cá nhân chỉ bảo vệ endpoint <code>/mcp</code>. Các API <code>/api/*</code> của web app hiện chưa có đăng nhập — nên đặt web app sau VPN / SSO của công ty.</p>
+      </div>
+    </details>
+  </div>
+</section>
+
+

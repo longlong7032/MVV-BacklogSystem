@@ -1,0 +1,20 @@
+{
+  // Frontend server (Node.js): src/server.ts, src/pages/  ->  biên dịch ra dist/
+  "compilerOptions": {
+    "target": "ES2022",
+    "strict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "moduleDetection": "force",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/server.ts", "src/backend.ts", "src/lib/**/*.ts", "src/pages/**/*.ts", "src/types.d.ts"]
+}

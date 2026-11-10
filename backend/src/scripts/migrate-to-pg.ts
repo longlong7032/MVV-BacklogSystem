@@ -14,7 +14,7 @@ import path from 'node:path';
 import { createPgDriver, resolveDatabaseUrl, MIME_BY_EXT } from '../lib/store.js';
 import type { StoredUpload } from '../lib/store.js';
 import { ROOT_DIR } from '../lib/paths.js';
-import type { Database } from '../shared/types.js';
+import type { Database } from '../types.js';
 
 // Cờ dòng lệnh: --dry-run (chỉ xem), --force (ghi đè DB đích đã có dữ liệu)
 const args = new Set(process.argv.slice(2));

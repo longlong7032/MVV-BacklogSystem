@@ -1,0 +1,5 @@
+<select data-status-id="{{id}}" aria-label="Trạng thái backlog #{{stt}}"
+  class="w-full cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-200 {{badge}}">
+  {{> options}}
+</select>
+{{#if doneAt}}<p class="mt-1 text-xs text-slate-400">Xong {{fmtDate doneAt}}</p>{{/if}}

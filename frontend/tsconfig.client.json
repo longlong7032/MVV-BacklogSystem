@@ -1,0 +1,20 @@
+{
+  // JS chạy trong trình duyệt: src/client/app.ts (và các module nó import)  ->  public/js/ (nạp bằng <script type="module">)
+  "compilerOptions": {
+    "target": "ES2022",
+    "strict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "moduleDetection": "force",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "rootDir": "src/client",
+    "outDir": "public/js"
+  },
+  "include": ["src/client/app.ts", "src/types.d.ts"]
+}

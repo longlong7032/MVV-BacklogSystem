@@ -10,7 +10,7 @@
  *  - `bg:getHar`  -> { har }               HAR dựng từ log ghi nền
  *  - `bg:clear`   -> { ok }                xóa log của tab
  */
-import type { Har, HarEntry, HarHeader } from '../../shared/types.js';
+import type { Har, HarEntry, HarHeader } from './types.js';
 
 /* ---------- Kiểu dữ liệu ---------- */
 

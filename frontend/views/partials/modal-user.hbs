@@ -1,0 +1,76 @@
+<!-- Form thêm / sửa người dùng -->
+<div id="userModal" data-modal class="fixed inset-0 z-[45] hidden items-start justify-center overflow-y-auto bg-slate-900/50 p-4">
+  <form id="userForm" class="my-16 w-full max-w-lg rounded-lg bg-white shadow-xl" novalidate>
+    <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+      <h2 data-title class="text-base font-semibold text-slate-900">Thêm người dùng</h2>
+      <button type="button" data-close class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Đóng">
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 0 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z"/></svg>
+      </button>
+    </div>
+    <div class="space-y-4 px-5 py-5">
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label for="uName" class="mb-1 block text-sm font-medium text-slate-700">Họ tên</label>
+          <input id="uName" name="name" maxlength="120" autocomplete="off" required class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
+        </div>
+        <div>
+          <label for="uEmail" class="mb-1 block text-sm font-medium text-slate-700">Email</label>
+          <input id="uEmail" name="email" type="email" maxlength="200" autocomplete="off" required class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
+        </div>
+      </div>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label for="uRole" class="mb-1 block text-sm font-medium text-slate-700">Quyền MCP</label>
+          <select id="uRole" name="role" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
+            <option value="read">Chỉ đọc</option>
+            <option value="write">Đọc + ghi (đổi trạng thái, giao team)</option>
+            <option value="admin">Quản trị viên (đọc + ghi + quản lý người dùng)</option>
+          </select>
+        </div>
+        <div>
+          <label for="uTeam" class="mb-1 block text-sm font-medium text-slate-700">Team <span class="font-normal text-slate-500">(không bắt buộc)</span></label>
+          <select id="uTeam" name="teamId" class="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">{{> options options=teamOptions}}</select>
+        </div>
+      </div>
+      <label data-edit-only class="hidden items-center gap-2 text-sm text-slate-700">
+        <input type="checkbox" id="uActive" name="active" class="rounded border-slate-300"> Tài khoản đang hoạt động (bỏ chọn để chặn kết nối)
+      </label>
+      <p data-create-only class="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">Token cá nhân sẽ được tạo ngay sau khi lưu và chỉ hiển thị một lần.</p>
+      <p data-error class="hidden rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+    </div>
+    <div class="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
+      <button type="button" data-close class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Hủy</button>
+      <button type="submit" data-submit class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60">Lưu</button>
+    </div>
+  </form>
+</div>
+
+<!-- Hiển thị token (một lần) -->
+<div id="tokenModal" data-modal data-modal-sticky class="fixed inset-0 z-[48] hidden items-start justify-center overflow-y-auto bg-slate-900/60 p-4">
+  <div class="my-12 w-full max-w-2xl rounded-lg bg-white shadow-xl">
+    <div class="border-b border-slate-200 px-5 py-4">
+      <h2 class="text-base font-semibold text-slate-900">Token của <span data-token-user></span></h2>
+    </div>
+    <div class="space-y-4 px-5 py-5 text-sm text-slate-600">
+      <p class="rounded-md bg-amber-50 px-3 py-2 text-amber-800"><b>Sao chép ngay.</b> Token chỉ hiển thị một lần này, hệ thống chỉ lưu bản băm nên không thể xem lại. Mất token thì phải cấp lại. Gửi riêng cho đúng người dùng, không đăng vào chat chung hay commit vào repo.</p>
+      <div>
+        <p class="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Token</p>
+        <div class="flex items-center gap-2 rounded-md border border-slate-300 bg-slate-50 px-3 py-2">
+          <code id="tokenValue" class="min-w-0 flex-1 break-all text-sm text-slate-900"></code>
+          <button type="button" data-copy-target="#tokenValue" class="shrink-0 rounded border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100">Sao chép</button>
+        </div>
+      </div>
+      <div>
+        <p class="mb-1 text-xs font-medium uppercase tracking-wide text-slate-500">Lệnh kết nối Claude Code</p>
+        <div class="relative">
+          <button type="button" data-copy-target="#tokenCmd" class="absolute right-2 top-2 rounded border border-slate-600 bg-slate-800 px-2 py-1 text-xs font-medium text-slate-200 hover:bg-slate-700">Sao chép</button>
+          <pre class="overflow-x-auto rounded-md bg-slate-900 p-4 pr-24 text-sm leading-relaxed text-slate-100"><code id="tokenCmd"></code></pre>
+        </div>
+        <p class="mt-2 text-xs">Cấu hình cho Cursor, VS Code... xem trang <a href="/mcp-guide" class="font-medium text-indigo-600 hover:text-indigo-800">Kết nối MCP</a>.</p>
+      </div>
+    </div>
+    <div class="flex justify-end border-t border-slate-200 bg-slate-50 px-5 py-3">
+      <button type="button" data-token-done class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700">Tôi đã lưu token</button>
+    </div>
+  </div>
+</div>

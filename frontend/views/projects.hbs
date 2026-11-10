@@ -1,0 +1,56 @@
+<section>
+  <div class="rounded-lg border border-slate-200 bg-white shadow-sm">
+    <div class="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-4">
+      <form method="get" action="/projects" data-autosubmit>
+        <input name="q" value="{{q}}" type="search" placeholder="Tìm dự án..."
+          class="w-60 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
+      </form>
+      <p class="text-sm text-slate-500">{{summary}}</p>
+      <button type="button" data-open-form="project"
+        class="ml-auto inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-300">
+        <span aria-hidden="true" class="text-base leading-none">+</span> Thêm dự án
+      </button>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full min-w-[860px] table-fixed border-collapse text-left text-sm">
+        <colgroup>
+          <col>
+          <col class="w-72">
+          <col class="w-32">
+          <col class="w-52">
+        </colgroup>
+        <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th class="px-3 py-3 font-semibold">Dự án</th>
+            <th class="px-3 py-3 font-semibold">Tiến độ backlog</th>
+            <th class="px-3 py-3 font-semibold">Ngày tạo</th>
+            <th class="px-3 py-3 text-right font-semibold">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          {{#each rows}}
+          <tr data-item="{{json item}}" class="align-top hover:bg-slate-50">
+            <td class="px-3 py-3">
+              {{#if code}}<span class="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs font-semibold text-slate-700">{{code}}</span>{{/if}}
+              <p class="break-words font-medium text-slate-900">{{name}}</p>
+              {{#if description}}<p class="mt-1 whitespace-pre-wrap break-words text-slate-500">{{description}}</p>{{/if}}
+            </td>
+            <td class="px-3 py-3">{{> progress progress}}</td>
+            <td class="px-3 py-3 text-slate-500">{{fmtDate createdAt}}</td>
+            <td class="px-3 py-3">
+              <div class="flex justify-end gap-1">
+                <a href="{{backlogHref}}" class="rounded px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50">Xem backlog</a>
+                <button type="button" data-act="edit" class="rounded px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100">Sửa</button>
+                <button type="button" data-act="delete" data-id="{{id}}" data-resource="projects" data-label="dự án &quot;{{name}}&quot;" data-warn="Toàn bộ backlog (kèm ảnh) của dự án này cũng sẽ bị xóa và không thể khôi phục." class="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50">Xóa</button>
+              </div>
+            </td>
+          </tr>
+          {{else}}{{> table_message colspan=4 message=empty}}{{/each}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+
+{{> modal_project}}

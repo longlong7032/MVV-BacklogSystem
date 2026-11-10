@@ -1,0 +1,17 @@
+<tr data-item="{{json item}}" class="align-top hover:bg-slate-50{{#if done}} text-slate-500{{/if}}">
+  <td class="px-3 py-3">{{> project_cell project}}</td>
+  <td class="px-3 py-3">{{> type_chip}}</td>
+  <td class="px-3 py-3">{{> team_cell team}}</td>
+  <td class="px-3 py-3">{{> status_cell status}}</td>
+  <td class="break-words px-3 py-3 font-medium {{#if done}}text-slate-500{{else}}text-slate-900{{/if}}">{{#if title}}{{title}}{{else}}{{> dash}}{{/if}}</td>
+  <td class="px-3 py-3">{{> location_cell location}}</td>
+  <td class="px-3 py-3">{{> content_cell bug}}</td>
+  <td class="px-3 py-3">{{> content_cell expected}}</td>
+  <td class="px-3 py-3 text-slate-600">{{#if note}}{{> text_block text=note}}{{else}}{{> dash}}{{/if}}</td>
+  <td class="px-3 py-3">
+    <div class="flex justify-end gap-1">
+      <button type="button" data-act="edit" class="rounded px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100">Sửa</button>
+      <button type="button" data-act="delete" data-id="{{id}}" data-label="backlog #{{stt}}" class="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50">Xóa</button>
+    </div>
+  </td>
+</tr>

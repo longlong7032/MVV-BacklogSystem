@@ -1,0 +1,9 @@
+{{#each rows}}
+<a href="{{href}}" class="block px-5 py-3 hover:bg-slate-50">
+  <div class="mb-1 flex items-center justify-between gap-3 text-sm">
+    <span class="truncate font-medium text-slate-800">{{name}}</span>
+    <span class="shrink-0 text-xs text-slate-500">{{total}} backlog · {{todo}} chưa làm · {{doing}} đang làm</span>
+  </div>
+  {{> progress progress}}
+</a>
+{{else}}<p class="px-5 py-8 text-center text-sm text-slate-500">{{empty}}</p>{{/each}}

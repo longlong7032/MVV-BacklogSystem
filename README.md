@@ -1,33 +1,65 @@
 # Feedback backlog
 
-Express + HBS + Tailwind (CDN), render phía client (CSR). Toàn bộ mã nguồn viết bằng **TypeScript** (server, giao diện và extension Chrome).
+Hệ thống ghi nhận và theo dõi backlog lỗi theo dự án. Viết bằng **TypeScript**, gồm 3 project độc lập trong cùng repo — mỗi thư mục có `package.json` riêng nên sau này tách thành các repo khác nhau chỉ cần copy thư mục:
 
-## Chạy
+| Thư mục | Vai trò | Công nghệ |
+|---|---|---|
+| [`backend/`](backend) | **API JSON** + upload ảnh + MCP + lưu trữ (Postgres / file JSON, Cloudflare R2). Không có giao diện. | Express |
+| [`frontend/`](frontend) | **Giao diện**: server render HTML bằng Handlebars, gọi backend qua HTTP; JS phía trình duyệt gọi API để thêm / sửa / xóa. | Express + Handlebars + Tailwind (CDN) |
+| [`chrome-extension/`](chrome-extension) | Extension Chrome báo lỗi nhanh khi test (chụp màn hình + HAR). | Chrome MV3 |
 
-```bash
-npm install
-npm run build    # biên dịch TypeScript: server -> dist/, giao diện -> public/js/app.js, extension -> chrome-extension/*.js
-npm start        # chạy bản đã build: http://localhost:3000  (đổi cổng: PORT=4000 npm start)
-npm run dev      # build giao diện rồi chạy server bằng tsx, tự restart khi sửa file .ts của server
-npm run typecheck   # chỉ kiểm tra kiểu, không sinh file
+```
+Trình duyệt ──► frontend (:3000) ──┬─ render trang (hbs), lấy dữ liệu từ backend qua HTTP
+                                   └─ proxy /api, /uploads, /mcp ──► backend (:4000) ──► Postgres / R2 / file
 ```
 
-Khi sửa giao diện (`client/app.ts`) trong lúc `npm run dev`, mở thêm một terminal chạy `npm run build:client -- --watch` rồi tải lại trang.
+Frontend **không đọc DB và không import code của backend**; hai bên chỉ giao tiếp qua API (`/api/...`). Kiểu dữ liệu của API nằm ở `backend/src/types.d.ts` (frontend và extension giữ bản sao `src/types.d.ts` — khi đổi API nhớ cập nhật cả hai).
+
+## Chạy local
+
+```bash
+npm run install:all      # cài thư viện cho backend, frontend, extension
+npm run build            # biên dịch cả 3 project
+
+# Terminal 1 — backend (mặc định :4000; cấu hình trong backend/.env)
+npm run dev:backend
+# Terminal 2 — frontend (mặc định :3000; cấu hình trong frontend/.env, BACKEND_URL=http://localhost:4000)
+cp frontend/.env.example frontend/.env   # lần đầu
+npm run dev:frontend
+```
+
+Mở http://localhost:3000. Chạy bản build: `npm run start:backend` và `npm run start:frontend`. Kiểm tra kiểu: `npm run typecheck`.
+
+- Giao diện là các file `frontend/views/*.hbs` + `views/partials/*.hbs`: sửa rồi tải lại trang là thấy. Sửa `frontend/src/client/*.ts` thì chạy lại `npm --prefix frontend run build:client`.
+- Mỗi project cũng chạy độc lập: `cd backend && npm run dev`, `cd frontend && npm run dev`.
+
+## Biến môi trường
+
+| Project | File | Biến chính |
+|---|---|---|
+| backend | `backend/.env` (mẫu: `backend/.env.example`) | `PORT`, `DATABASE_URL`, `R2_*`, `ADMIN_EMAIL` / `ADMIN_PASSWORD`, `PUBLIC_URL`, `MCP_READONLY`, `TRUST_PROXY` |
+| frontend | `frontend/.env` (mẫu: `frontend/.env.example`) | `PORT`, `BACKEND_URL`, `TRUST_PROXY`, `PUBLIC_URL` |
+
+`PUBLIC_URL` của backend nên là địa chỉ công khai của **frontend** (vì ảnh / HAR được phục vụ qua `/uploads/...` của frontend khi MCP dựng link).
 
 ## Deploy lên Vercel + Postgres (Neon)
 
-Vercel không cho ghi file, nên khi có biến kết nối Postgres app tự chuyển sang lưu **toàn bộ dữ liệu và ảnh vào Postgres**. Không có biến này (chạy local) app vẫn dùng file `data/db.json` + thư mục `uploads/` như cũ, nên chạy thử local **không đụng dữ liệu production**.
+Deploy thành **2 project Vercel**, root directory lần lượt là `backend` và `frontend` (mỗi project có `vercel.json` + `api/index.js` riêng).
 
-1. **Biến môi trường trên Vercel** (Project → Settings → Environment Variables):
+Vercel không cho ghi file, nên khi backend có biến kết nối Postgres nó lưu **toàn bộ dữ liệu và ảnh vào Postgres**. Điền thêm 4 biến `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` thì **ảnh và file HAR lưu trên Cloudflare R2** (Postgres chỉ giữ dữ liệu); file cũ nằm trong Postgres vẫn đọc được. Bucket giữ ở chế độ private — backend tự phục vụ file qua `/uploads/...`. Không có biến này (chạy local) backend dùng `backend/data/db.json` + `backend/uploads/`, nên chạy thử local **không đụng dữ liệu production**.
+
+1. **Project backend** — Environment Variables:
 
    | Biến | Ghi chú |
    |---|---|
    | `DATABASE_URL` | Chuỗi kết nối Postgres (Neon). Cũng nhận `POSTGRES_URL`, `POSTGRES_PRISMA_URL`, `NEON_DATABASE_URL` hoặc biến nào có dạng `postgresql://...` |
+   | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | Cloudflare R2 (không bắt buộc) |
    | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | Admin cứng — **đặt mật khẩu mạnh, khác môi trường local** |
-   | `PUBLIC_URL` | Không bắt buộc, vd `https://mvv-backlog.vercel.app` |
+   | `PUBLIC_URL` | Địa chỉ công khai của frontend, vd `https://mvv-backlog.vercel.app` |
 
-2. Push code lên GitHub, Vercel tự build. Cấu hình nằm ở `vercel.json` + `api/index.js` (Express chạy như một serverless function). Bảng `app_state` và `files` được tạo tự động ở lần chạy đầu tiên.
-3. **Chuyển dữ liệu local lên** (một lần, không bắt buộc):
+2. **Project frontend** — Environment Variables: `BACKEND_URL` (địa chỉ project backend, vd `https://mvv-backlog-api.vercel.app`) và tùy chọn `PUBLIC_URL`.
+3. Push code lên GitHub, Vercel tự build. Bảng `app_state` và `files` được tạo tự động ở lần chạy đầu tiên.
+4. **Chuyển dữ liệu local lên** (một lần, không bắt buộc), chạy trong thư mục `backend`:
 
    ```bash
    DATABASE_URL="postgresql://..." npm run migrate-to-pg -- --dry-run   # xem sẽ chuyển gì
@@ -39,26 +71,27 @@ Vercel không cho ghi file, nên khi có biến kết nối Postgres app tự ch
 ## Cấu trúc
 
 ```
-server.ts            API + upload ảnh (multer) + MCP; export app cho Vercel
-shared/types.d.ts    kiểu dữ liệu dùng chung (Project, Team, Feedback, User, ...)
-lib/*.ts             lưu trữ (store), nén ảnh, token, nạp .env, tìm thư mục gốc
-mcp/server.ts        MCP server (các tool cho Claude Code / Cursor)
-scripts/*.ts         create-admin, migrate-to-pg
-dist/                bản build của server (sinh ra bởi npm run build, không commit)
-tsconfig*.json       cấu hình TypeScript: server / client / extension
-api/index.js         điểm vào của Vercel (file JS mỏng, import dist/server.js; vercel.json rewrite mọi request về đây)
-views/layout.hbs     layout, nạp Tailwind
-views/index.hbs      khung trang (toolbar, bảng, form, lightbox)
-client/app.ts        toàn bộ render + logic phía client (build ra public/js/app.js)
-chrome-extension/    extension Chrome báo lỗi nhanh khi test (mã nguồn trong src/*.ts, build ra *.js cùng thư mục)
-data/db.json         dữ liệu (tự tạo)
-uploads/             ảnh đính kèm
+backend/
+  src/server.ts         API + upload ảnh (multer) + MCP; export app cho Vercel
+  src/types.d.ts        kiểu dữ liệu của API (Project, Team, Feedback, User, ...)
+  src/lib/*.ts          lưu trữ (store), R2, nén ảnh, token, nạp .env, tìm thư mục gốc
+  src/mcp/server.ts     MCP server (các tool cho Claude Code / Cursor)
+  src/scripts/*.ts      create-admin, migrate-to-pg
+  api/index.js          điểm vào của Vercel (import dist/server.js)
+  data/db.json, uploads/  dữ liệu local (tự tạo, không commit)
+frontend/
+  src/server.ts         Express: proxy /api /uploads /mcp sang backend + render trang
+  src/backend.ts        hàm gọi backend qua HTTP (chuyển tiếp cookie)
+  src/pages/*.ts        route các trang + dữ liệu hiển thị (lọc, phân trang, tiến độ)
+  views/*.hbs           HTML từng trang (Handlebars); views/partials/*.hbs là mảnh dùng chung
+  src/client/*.ts       JS phía trình duyệt (modal, form, ảnh, kéo thả), build ra public/js/
+chrome-extension/       extension Chrome (mã nguồn src/*.ts, build ra *.js cùng thư mục)
 ```
 
 ## Chức năng
 
-- **Dự án** (tab "Dự án", `#/projects`): thêm / sửa / xóa dự án (tên không trùng, mô tả). Bảng hiển thị tiến độ backlog (% hoàn thành, số chưa làm / đang làm). Xóa dự án sẽ xóa luôn toàn bộ backlog và ảnh của dự án đó (có xác nhận).
-- **Backlog** (tab "Backlog", `#/backlog`): thêm / sửa / xóa backlog, lọc theo dự án, theo trạng thái, tìm kiếm.
+- **Dự án** (tab "Dự án", `/projects`): thêm / sửa / xóa dự án (tên không trùng, mô tả). Bảng hiển thị tiến độ backlog (% hoàn thành, số chưa làm / đang làm). Xóa dự án sẽ xóa luôn toàn bộ backlog và ảnh của dự án đó (có xác nhận).
+- **Backlog** (tab "Backlog", `/backlog`): thêm / sửa / xóa backlog, lọc theo dự án, theo trạng thái, tìm kiếm.
 - **Trạng thái**: `Chưa làm` · `Đang làm` · `Đã hoàn thành` — đổi trực tiếp ngay trên bảng (dropdown ở cột Trạng thái) hoặc trong form. Khi chuyển sang hoàn thành sẽ lưu ngày hoàn thành.
 
 ## Cột dữ liệu backlog
@@ -106,7 +139,7 @@ Backlog:
 Cài đặt:
 
 1. Mở `chrome://extensions`, bật **Developer mode**.
-2. Chạy `npm run build:extension` (biên dịch `chrome-extension/src/*.ts` ra `background.js`, `popup.js`, `devtools.js`).
+2. Chạy `npm --prefix chrome-extension run build` (biên dịch `chrome-extension/src/*.ts` ra `background.js`, `popup.js`, `devtools.js`).
 3. Bấm **Load unpacked** → chọn thư mục `chrome-extension/`. Sau mỗi lần sửa code, build lại rồi bấm Reload ở trang `chrome://extensions`.
 4. Ghim extension lên thanh công cụ. Mặc định extension gửi tới `http://localhost:3000`; đổi trong mục **Cài đặt** ở cuối popup.
 
@@ -126,13 +159,13 @@ Popup tự đóng khi bấm ra ngoài; nội dung đang nhập được giữ l�
 
 ## MCP cho team dev
 
-MCP chạy **ngay trong web app** tại `POST /mcp` (Streamable HTTP) nên khi deploy dev chỉ cần URL, không cài gì thêm. Hướng dẫn chi tiết cho từng công cụ nằm ở trang **Kết nối MCP** (`#/mcp`) trong web app.
+MCP chạy **ngay trong web app** tại `POST /mcp` (Streamable HTTP) nên khi deploy dev chỉ cần URL, không cài gì thêm. Hướng dẫn chi tiết cho từng công cụ nằm ở trang **Kết nối MCP** (`/mcp-guide`) trong web app.
 
 ```bash
 claude mcp add --transport http feedback-backlog https://<host>/mcp --header "Authorization: Bearer <token cá nhân>"
 ```
 
-**Người dùng & token cá nhân:** trang **Người dùng** (`#/users`) cho phép thêm / sửa / vô hiệu hóa / xóa người dùng; mỗi người có **1 token riêng** (`fbk_…`), hiển thị đúng một lần khi tạo hoặc cấp lại (DB chỉ lưu băm SHA-256). Có thể thu hồi / cấp lại token và đặt vai trò theo từng người:
+**Người dùng & token cá nhân:** trang **Người dùng** (`/users`) cho phép thêm / sửa / vô hiệu hóa / xóa người dùng; mỗi người có **1 token riêng** (`fbk_…`), hiển thị đúng một lần khi tạo hoặc cấp lại (DB chỉ lưu băm SHA-256). Có thể thu hồi / cấp lại token và đặt vai trò theo từng người:
 
 | Vai trò | MCP | Trang Người dùng |
 |---|---|---|
@@ -143,7 +176,7 @@ claude mcp add --transport http feedback-backlog https://<host>/mcp --header "Au
 Quản trị viên đăng nhập trang Người dùng bằng **email + mật khẩu** (admin cứng đặt trong `.env`, xem bên dưới) hoặc bằng **token cá nhân**. Ngoài ra có thể tạo admin bằng lệnh chạy trên server:
 
 ```bash
-npm run create-admin -- "Họ tên" email@congty.vn   # in token một lần; chạy lại với email cũ = cấp lại token
+npm --prefix backend run create-admin -- "Họ tên" email@congty.vn   # in token một lần; chạy lại với email cũ = cấp lại token
 ```
 
 Không thể xóa / hạ quyền / vô hiệu hóa / thu hồi token của quản trị viên hoạt động cuối cùng. Mọi thao tác quản trị được ghi vào "Nhật ký hoạt động" trên trang Người dùng; thay đổi trạng thái / giao team qua MCP ghi nhận "cập nhật bởi <tên>".
@@ -164,4 +197,4 @@ Sau nginx / load balancer: bật HTTPS, chuyển tiếp `Host` + `X-Forwarded-Pr
 
 **Tool:** `list_projects`, `list_teams`, `list_backlog`, `get_backlog` (kèm ảnh), `analyze_har`, `update_backlog_status`, `assign_backlog_team`.
 
-Chạy local kiểu stdio vẫn dùng được: `BACKLOG_URL=http://localhost:3000 npx tsx mcp/server.ts`.
+Chạy local kiểu stdio vẫn dùng được: `BACKLOG_URL=http://localhost:3000 npx tsx backend/src/mcp/server.ts`.
