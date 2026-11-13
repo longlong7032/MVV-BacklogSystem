@@ -42,6 +42,9 @@ const zones: Record<ZoneName, Zone> = {
   expected: { multi: true, existing: [], files: [], removed: [] },
 };
 
+/** File HAR mới chọn (chưa tải lên); thay file HAR đã có khi lưu. */
+let harFile: File | null = null;
+
 /** Blob URL của từng File đang xem trước (thu hồi khi không dùng nữa, tránh rò bộ nhớ). */
 const objectUrls = new Map<File, string>();
 const blobUrl = (file: File): string => {
@@ -266,7 +269,8 @@ export function initFeedbackForm(): void {
     resetZone('bug', item ? item.bug.images : []);
     resetZone('expected', item ? item.expected.images : []);
 
-    // File HAR đính kèm (chỉ xem / gỡ, không thay trong form này)
+    setHarFile(null);
+    // File HAR đã đính kèm (xem / gỡ; chọn file mới ở ô bên dưới để thay)
     const har = item?.har;
     const harBox = $('#fHarBox');
     harBox.classList.toggle('hidden', !har);
@@ -297,6 +301,7 @@ export function initFeedbackForm(): void {
   /** Sau "Lưu & thêm tiếp": xóa nội dung lỗi, giữ nguyên dự án / loại / team / trạng thái. */
   const resetForNext = (): void => {
     [f.title, f.locationUrl, f.bugText, f.expectedText, f.note].forEach((el) => (el.value = ''));
+    setHarFile(null);
     noteBox.open = false;
     (['location', 'bug', 'expected'] as ZoneName[]).forEach((z) => resetZone(z));
     setError(errorBox, '');
@@ -340,18 +345,19 @@ export function initFeedbackForm(): void {
     zones.location.files.forEach((file) => fd.append('location_image', file));
     zones.bug.files.forEach((file) => fd.append('bug_images', file));
     zones.expected.files.forEach((file) => fd.append('expected_images', file));
+    if (harFile) fd.append('har_file', harFile);
 
     // Trên Vercel mỗi request chỉ nhận ~4MB: báo sớm thay vì để server từ chối sau khi đã tải lên
     if (maxUploadBytes === null)
       maxUploadBytes = (await api<{ maxUploadBytes?: number }>('/api/mcp-info').catch(() => ({ maxUploadBytes: 0 }))).maxUploadBytes ?? 0;
     const totalBytes = (['location', 'bug', 'expected'] as ZoneName[]).reduce(
       (n, z) => n + zones[z].files.reduce((m, file) => m + file.size, 0),
-      0
+      harFile?.size ?? 0
     );
     if (maxUploadBytes && totalBytes > maxUploadBytes) {
       setError(
         errorBox,
-        `Tổng dung lượng ảnh ${(totalBytes / 1048576).toFixed(1)}MB vượt giới hạn ${(maxUploadBytes / 1048576).toFixed(1)}MB mỗi lần lưu. Hãy bớt ảnh rồi lưu, sau đó thêm ảnh còn lại bằng nút Sửa.`
+        `Tổng dung lượng file ${(totalBytes / 1048576).toFixed(1)}MB vượt giới hạn ${(maxUploadBytes / 1048576).toFixed(1)}MB mỗi lần lưu. Hãy bớt file rồi lưu, sau đó thêm phần còn lại bằng nút Sửa.`
       );
       return;
     }
@@ -425,6 +431,21 @@ export function initFeedbackForm(): void {
     })
   );
 
+  // Ô tải file HAR
+  $('#fHarPick').addEventListener('click', () => $<HTMLInputElement>('#fHarInput').click());
+  $('#fHarClear').addEventListener('click', () => setHarFile(null));
+  $<HTMLInputElement>('#fHarInput').addEventListener('change', (e) => {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0] ?? null;
+    input.value = '';
+    if (file && !/\.har$/i.test(file.name)) {
+      setError(errorBox, 'Chỉ nhận file .har (xuất từ DevTools > Network).');
+      return;
+    }
+    setError(errorBox, '');
+    setHarFile(file);
+  });
+
   // Vùng nhận ảnh khi dán: vùng đang trỏ chuột / focus
   $$('[data-zone]').forEach((section) => {
     const name = data(section, 'zone') as ZoneName;
@@ -484,4 +505,11 @@ export function initFeedbackForm(): void {
 
   // Đóng form bằng nút Hủy / × đã do ui.ts xử lý; ở đây chỉ cần dọn blob khi đóng
   modal.addEventListener('modal:closed', () => (['location', 'bug', 'expected'] as ZoneName[]).forEach((z) => resetZone(z)));
+}
+
+/** Chọn / bỏ file HAR mới và cập nhật dòng hiển thị tên file. */
+function setHarFile(file: File | null): void {
+  harFile = file;
+  $('#fHarHint').textContent = file ? `${file.name} (${(file.size / 1048576).toFixed(1)}MB)` : 'chưa chọn file (.har)';
+  $('#fHarClear').classList.toggle('hidden', !file);
 }

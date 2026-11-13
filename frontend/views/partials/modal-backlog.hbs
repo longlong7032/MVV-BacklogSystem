@@ -74,6 +74,14 @@
             <input type="checkbox" id="fRemoveHar" class="h-4 w-4 rounded border-slate-300"> Gỡ HAR
           </label>
         </div>
+        <div class="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-2">
+          <button type="button" id="fHarPick" class="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-100 sm:min-h-0 sm:py-1.5">
+            <span aria-hidden="true">📎</span> Thêm file HAR
+          </button>
+          <span id="fHarHint" class="text-sm text-slate-500">chưa chọn file (.har)</span>
+          <button type="button" id="fHarClear" class="hidden text-sm font-medium text-red-600 hover:text-red-800">Bỏ</button>
+          <input type="file" id="fHarInput" accept=".har,application/json" class="hidden">
+        </div>
       </section>
 
       <section data-zone="bug" class="-m-2 rounded-lg border border-transparent p-2">
