@@ -1,0 +1,96 @@
+{{!--
+  Danh sách backlog dùng chung cho trang /backlog và tab Backlog trong trang dự án. Context = backlogModel().
+  Một khối duy nhất:  [tab trạng thái + số lượng | Bảng/Kanban]  →  [tìm kiếm + bộ lọc]  →  danh sách  →  phân trang.
+--}}
+<div class="card border border-base-content/10 bg-base-100 shadow-sm">
+  <!-- Hàng 1: lọc theo trạng thái (tab có số lượng) + chế độ xem -->
+  <div class="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-base-content/10 px-4 pt-2">
+    {{#if board}}
+    <p class="py-3 text-sm text-base-content/70"><b class="text-base-content">{{resultCount}}</b> backlog · kéo thẻ sang cột khác để đổi trạng thái</p>
+    {{else}}
+    <div role="tablist" class="tabs tabs-bordered -mb-px overflow-x-auto" aria-label="Lọc theo trạng thái">
+      {{#each tabs}}
+      <a href="{{href}}" role="tab" aria-selected="{{active}}" class="tab h-11 flex-nowrap gap-2 whitespace-nowrap {{#if active}}tab-active font-semibold{{/if}}">
+        {{#if key}}<span class="h-2 w-2 rounded-full {{dot}}" aria-hidden="true"></span>{{/if}}{{label}}
+        <span class="badge badge-sm {{#if active}}badge-primary{{else}}badge-ghost{{/if}}">{{count}}</span>
+      </a>
+      {{/each}}
+    </div>
+    {{/if}}
+    <div class="join mb-2" role="group" aria-label="Chế độ xem">
+      {{#each modes}}<a href="{{href}}" class="btn btn-sm join-item {{#if active}}btn-active{{/if}}" aria-current="{{#if active}}true{{else}}false{{/if}}">{{label}}</a>{{/each}}
+    </div>
+  </div>
+
+  <!-- Hàng 2: tìm kiếm + bộ lọc (GET, đổi là tự lọc lại) -->
+  <form method="get" action="{{formAction}}" id="filterForm" class="grid grid-cols-2 items-center gap-2 border-b border-base-content/10 px-4 py-3 sm:flex sm:flex-wrap">
+    <input type="hidden" name="status" value="{{filters.status}}">
+    {{#each fixedParams}}<input type="hidden" name="{{name}}" value="{{value}}">{{/each}}
+    {{#if board}}<input type="hidden" name="mode" value="board">{{/if}}
+    <label class="input input-bordered input-sm col-span-2 flex min-w-0 flex-1 basis-64 items-center gap-2">
+      <svg class="h-4 w-4 shrink-0 opacity-60" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clip-rule="evenodd"/></svg>
+      <input id="filterQuery" name="q" value="{{filters.q}}" type="search" placeholder="Tìm tên lỗi, mô tả, ghi chú… (Enter)" autocomplete="off" class="min-w-0 grow" aria-label="Tìm kiếm backlog">
+    </label>
+    {{#unless scoped}}
+    <select name="project" data-autosubmit class="select select-bordered select-sm w-full min-w-0 sm:w-auto sm:max-w-[14rem]" aria-label="Dự án">{{> options options=projectOptions}}</select>
+    {{/unless}}
+    <select name="team" data-autosubmit class="select select-bordered select-sm w-full min-w-0 sm:w-auto sm:max-w-[12rem]" aria-label="Team xử lý">{{> options options=teamOptions}}</select>
+    <select name="type" data-autosubmit class="select select-bordered select-sm w-full min-w-0 sm:w-auto sm:max-w-[12rem]" aria-label="Loại">{{> options options=typeOptions}}</select>
+    <select name="sort" data-autosubmit class="select select-bordered select-sm w-full min-w-0 sm:w-auto" aria-label="Sắp xếp">{{> options options=sortOptions}}</select>
+    {{#if anyFilter}}<a href="{{clearHref}}" class="btn btn-ghost btn-sm col-span-2 sm:col-span-1">✕ Xóa lọc</a>{{/if}}
+  </form>
+
+  {{#if board}}
+  <!-- Kanban: mỗi cột một trạng thái -->
+  <div id="boardWrap" class="grid grid-cols-1 gap-4 p-4 lg:grid-cols-3">
+    {{#each columns}}
+    <section data-col="{{key}}" class="min-h-[14rem] rounded-box bg-base-200 p-3 transition">
+      <h3 class="mb-3 flex items-center gap-2 px-1 text-sm font-semibold">
+        <span class="h-2.5 w-2.5 rounded-full {{dot}}" aria-hidden="true"></span>{{label}}
+        <span class="badge badge-ghost badge-sm">{{count}}</span>
+      </h3>
+      <div class="space-y-3">{{#each cards}}{{> board_card}}{{else}}<p class="rounded-box border border-dashed border-base-content/20 py-8 text-center text-sm text-base-content/50">Thả backlog vào đây</p>{{/each}}</div>
+    </section>
+    {{/each}}
+  </div>
+  {{else}}
+  <!-- Bảng: mỗi dòng là bản tóm tắt; bấm tên / "Chi tiết" để xem đầy đủ và thao tác nhanh -->
+  <div class="overflow-x-auto">
+    <table class="table w-full md:min-w-[860px] md:table-fixed">
+      <colgroup>
+        {{#unless scoped}}<col class="hidden md:table-column md:w-40">{{/unless}}
+        <col>
+        <col class="hidden md:table-column md:w-24">
+        <col class="hidden md:table-column md:w-44">
+        <col class="hidden md:table-column md:w-32">
+        <col class="hidden md:table-column md:w-44">
+      </colgroup>
+      <thead>
+        <tr>
+          {{#unless scoped}}<th class="hidden md:table-cell">Dự án</th>{{/unless}}
+          <th>Backlog</th>
+          <th class="hidden md:table-cell">Ảnh</th>
+          <th class="hidden md:table-cell">Phụ trách</th>
+          <th class="hidden md:table-cell">Trạng thái</th>
+          <th class="hidden text-right md:table-cell"><span class="sr-only">Thao tác</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each rows}}{{> backlog_row scoped=../scoped}}{{else}}<tr><td colspan="6" class="py-14 text-center text-base-content/60">{{empty}}</td></tr>{{/each}}
+      </tbody>
+    </table>
+  </div>
+  {{/if}}
+
+  {{#if pager.show}}
+  <div class="flex flex-wrap items-center justify-between gap-3 border-t border-base-content/10 px-4 py-3 text-sm text-base-content/70">
+    <span>Hiển thị {{pager.from}}–{{pager.to}} / {{pager.total}} backlog</span>
+    <div class="join">
+      {{#if pager.prevHref}}<a href="{{pager.prevHref}}" class="btn btn-sm join-item">‹ Trước</a>{{else}}<span class="btn btn-sm join-item btn-disabled">‹ Trước</span>{{/if}}
+      <span class="btn btn-sm join-item no-animation pointer-events-none">Trang {{pager.page}}/{{pager.pages}}</span>
+      {{#if pager.nextHref}}<a href="{{pager.nextHref}}" class="btn btn-sm join-item">Sau ›</a>{{else}}<span class="btn btn-sm join-item btn-disabled">Sau ›</span>{{/if}}
+    </div>
+  </div>
+  {{/if}}
+</div>
+{{> modal_backlog_detail}}

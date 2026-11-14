@@ -11,7 +11,7 @@
     "build:client": "tsc -p tsconfig.client.json",
     "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit",
     "start": "node dist/server.js",
-    "dev": "npm run build:client && tsx watch src/server.ts",
+    "dev": "npm run build:client && tsx watch --include \"views/**/*.hbs\" src/server.ts",
     "vercel-build": "npm run build"
   },
   "dependencies": {
@@ -21,6 +21,7 @@
     "express": "^4.19.2",
     "hbs": "^4.2.0",
     "http-proxy-middleware": "^3.0.5",
+    "nodemon": "^3.1.14",
     "typescript": "^7.0.2"
   },
   "devDependencies": {

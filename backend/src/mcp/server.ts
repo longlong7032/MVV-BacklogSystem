@@ -100,10 +100,10 @@ const norm = (s: unknown): string =>
  * @param list danh sách dự án hoặc team
  * @param key id, mã hoặc tên người dùng nhập
  */
-const findByIdOrName = <T extends { id: string; name: string; code?: string }>(list: T[], key: string): T | undefined => {
+const findByIdOrName = <T extends { idPublic: string; name: string; code?: string }>(list: T[], key: string): T | undefined => {
   const k = norm(key);
   return (
-    list.find((x) => x.id === key) ||
+    list.find((x) => x.idPublic === key) ||
     list.find((x) => x.code && norm(x.code) === k) || // mã dự án
     list.find((x) => norm(x.name) === k) ||
     list.find((x) => norm(x.name).includes(k))
@@ -206,10 +206,10 @@ function createMcpServer({ backend, publicBase, canWrite = true }: McpServerOpti
 
   /** Bản rút gọn của backlog dùng khi liệt kê. */
   function brief(f: Feedback, ctx: BacklogContext) {
-    const project = ctx.projects.find((p) => p.id === f.projectId);
-    const team = ctx.teams.find((t) => t.id === f.teamId);
+    const project = ctx.projects.find((p) => p.idPublic === f.projectId);
+    const team = ctx.teams.find((t) => t.idPublic === f.teamId);
     return {
-      id: f.id,
+      id: f.idPublic,
       ref: `${project ? project.code || project.name : '?'}#${f.stt}`,
       project_code: project && project.code ? project.code : null,
       project: project ? project.name : null,
@@ -246,14 +246,14 @@ function createMcpServer({ backend, publicBase, canWrite = true }: McpServerOpti
   /** Tìm 1 backlog theo id (đủ hoặc tiền tố duy nhất), hoặc theo (project + stt). */
   function resolveBacklog(ctx: BacklogContext, { id, project, stt }: BacklogRef): ResolveResult {
     if (id) {
-      const matches = ctx.feedbacks.filter((f) => f.id === id || f.id.startsWith(id));
+      const matches = ctx.feedbacks.filter((f) => f.idPublic === id || f.idPublic.startsWith(id));
       if (matches.length === 1) return { item: matches[0] };
       return { error: matches.length ? `id "${id}" khớp nhiều backlog, hãy dùng id đầy đủ.` : `Không có backlog id "${id}".` };
     }
     if (project && stt) {
       const p = findByIdOrName(ctx.projects, project);
       if (!p) return { error: `Không tìm thấy dự án "${project}".` };
-      const item = ctx.feedbacks.find((f) => f.projectId === p.id && f.stt === stt);
+      const item = ctx.feedbacks.find((f) => f.projectId === p.idPublic && f.stt === stt);
       return item ? { item } : { error: `Dự án "${p.name}" không có backlog STT ${stt}.` };
     }
     return { error: 'Cần truyền "id", hoặc cả "project" và "stt".' };
@@ -265,10 +265,10 @@ function createMcpServer({ backend, publicBase, canWrite = true }: McpServerOpti
     const ctx = await loadAll();
     return text(
       ctx.projects.map((p) => {
-        const items = ctx.feedbacks.filter((f) => f.projectId === p.id);
+        const items = ctx.feedbacks.filter((f) => f.projectId === p.idPublic);
         const n = (s: FeedbackStatus) => items.filter((f) => f.status === s).length;
         return {
-          id: p.id,
+          id: p.idPublic,
           name: p.name,
           code: p.code || null,
           description: p.description,
@@ -285,9 +285,9 @@ function createMcpServer({ backend, publicBase, canWrite = true }: McpServerOpti
     const ctx = await loadAll();
     return text(
       ctx.teams.map((t) => {
-        const items = ctx.feedbacks.filter((f) => f.teamId === t.id);
+        const items = ctx.feedbacks.filter((f) => f.teamId === t.idPublic);
         return {
-          id: t.id,
+          id: t.idPublic,
           name: t.name,
           lead: t.lead,
           description: t.description,
@@ -320,14 +320,14 @@ function createMcpServer({ backend, publicBase, canWrite = true }: McpServerOpti
       if (project) {
         const p = findByIdOrName(ctx.projects, project);
         if (!p) return fail(`Không tìm thấy dự án "${project}". Dùng list_projects để xem danh sách.`);
-        list = list.filter((f) => f.projectId === p.id);
+        list = list.filter((f) => f.projectId === p.idPublic);
       }
       if (team) {
         if (norm(team) === 'none') list = list.filter((f) => !f.teamId);
         else {
           const t = findByIdOrName(ctx.teams, team);
           if (!t) return fail(`Không tìm thấy team "${team}". Dùng list_teams để xem danh sách.`);
-          list = list.filter((f) => f.teamId === t.id);
+          list = list.filter((f) => f.teamId === t.idPublic);
         }
       }
       if (status) list = list.filter((f) => f.status === status);
@@ -467,7 +467,7 @@ function createMcpServer({ backend, publicBase, canWrite = true }: McpServerOpti
         const ctx = await loadAll();
         const { item, error } = resolveBacklog(ctx, { id, project, stt });
         if (!item) return fail(error ?? 'Không tìm thấy backlog.');
-        return text(brief(await backend.setStatus(item.id, status), ctx));
+        return text(brief(await backend.setStatus(item.idPublic, status), ctx));
       }
     );
 
@@ -490,9 +490,9 @@ function createMcpServer({ backend, publicBase, canWrite = true }: McpServerOpti
         if (norm(team) !== 'none') {
           const t = findByIdOrName(ctx.teams, team);
           if (!t) return fail(`Không tìm thấy team "${team}".`);
-          teamId = t.id;
+          teamId = t.idPublic;
         }
-        return text(brief(await backend.assignTeam(item.id, teamId), ctx));
+        return text(brief(await backend.assignTeam(item.idPublic, teamId), ctx));
       }
     );
   }

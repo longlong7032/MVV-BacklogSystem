@@ -1,0 +1,6 @@
+{{!-- Khối "chưa có dữ liệu" dùng chung. Tham số: title, text?, icon? (ký tự/emoji). --}}
+<div class="col-span-full rounded-box border border-dashed border-base-content/10 bg-base-100 px-6 py-16 text-center">
+  {{#if icon}}<span class="mx-auto flex h-12 w-12 items-center justify-center rounded-box bg-base-200 text-2xl">{{icon}}</span>{{/if}}
+  <h3 class="mt-4 font-semibold">{{title}}</h3>
+  {{#if text}}<p class="mt-1 text-sm text-base-content/70">{{text}}</p>{{/if}}
+</div>

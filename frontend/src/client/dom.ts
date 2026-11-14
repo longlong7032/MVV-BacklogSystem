@@ -45,13 +45,17 @@ export const itemOf = <T>(el: HTMLElement): T | null => {
 
 /* ---------- Modal ---------- */
 
+/*
+ * Mọi modal dùng cấu trúc DaisyUI: `<div data-modal class="modal"><… class="modal-box">…</…></div>`.
+ * Hiện / ẩn bằng class `modal-open` — chỉ thao tác qua 3 hàm dưới đây, không tự đổi class ở nơi khác.
+ */
+
 /** Modal có đang hiển thị không. */
-export const isOpen = (el: HTMLElement): boolean => !el.classList.contains('hidden');
+export const isOpen = (el: HTMLElement): boolean => el.classList.contains('modal-open');
 
 /** Mở modal và khóa cuộn trang. */
 export const openModal = (el: HTMLElement): void => {
-  el.classList.remove('hidden');
-  el.classList.add('flex');
+  el.classList.add('modal-open');
   document.body.classList.add('overflow-hidden');
 };
 
@@ -60,8 +64,7 @@ export const openModal = (el: HTMLElement): void => {
  * Phát sự kiện `modal:closed` để nơi sở hữu modal xử lý (vd tải lại trang).
  */
 export const closeModal = (el: HTMLElement): void => {
-  el.classList.add('hidden');
-  el.classList.remove('flex');
+  el.classList.remove('modal-open');
   if (!$$('[data-modal]').some(isOpen)) document.body.classList.remove('overflow-hidden');
   el.dispatchEvent(new CustomEvent('modal:closed'));
 };

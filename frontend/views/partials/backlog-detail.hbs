@@ -1,0 +1,67 @@
+{{!--
+  Nội dung chi tiết một backlog (render sẵn trong <template>, client sao chép vào modal_backlog_detail). Context = rowContext.
+  Bố cục đọc theo luồng: thông tin chung → "Đang bị lỗi" | "Kết quả mong muốn" (cạnh nhau để so sánh) → vị trí lỗi → ghi chú.
+--}}
+<div data-detail-title class="hidden">#{{stt}} · {{#if title}}{{title}}{{else}}Chưa đặt tên{{/if}}</div>
+
+<!-- Thông tin chung -->
+<dl class="grid grid-cols-2 gap-x-6 gap-y-3 rounded-box border border-base-content/10 p-4 text-sm sm:grid-cols-4">
+  <div class="min-w-0"><dt class="text-xs text-base-content/60">Dự án</dt><dd class="truncate font-medium" title="{{projectLabel}}">{{projectLabel}}</dd></div>
+  <div class="min-w-0"><dt class="text-xs text-base-content/60">Loại</dt><dd class="truncate font-medium">{{#if type}}{{type}}{{else}}<span class="font-normal text-base-content/50">Chưa chọn</span>{{/if}}</dd></div>
+  <div class="min-w-0"><dt class="text-xs text-base-content/60">Phụ trách</dt><dd class="truncate font-medium">{{#if teamName}}{{teamName}}{{else}}<span class="font-normal text-warning">Chưa phân công</span>{{/if}}{{#if assigneeName}} · {{assigneeName}}{{/if}}</dd></div>
+  <div class="min-w-0"><dt class="text-xs text-base-content/60">Cập nhật</dt><dd class="truncate font-medium" title="{{dateTime updatedAt}}">{{timeAgo updatedAt}}{{#if team.updatedBy}} · {{team.updatedBy}}{{/if}}{{#if status.doneAt}} · <span class="text-success">xong {{fmtDate status.doneAt}}</span>{{/if}}</dd></div>
+</dl>
+
+<!-- Lỗi ↔ Mong muốn -->
+<div class="mt-4 grid gap-4 md:grid-cols-2">
+  <section class="rounded-box border border-error/30 bg-error/5 p-4">
+    <h3 class="flex items-center gap-2 text-sm font-semibold text-error">
+      <span class="flex h-6 w-6 items-center justify-center rounded-full bg-error/15 text-xs" aria-hidden="true">✕</span>
+      Đang bị lỗi
+      {{#if bug.images.length}}<span class="ml-auto text-xs font-normal text-base-content/60">{{bug.images.length}} ảnh</span>{{/if}}
+    </h3>
+    {{#if bug.text}}<p class="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed">{{bug.text}}</p>{{else}}<p class="mt-2 text-sm text-base-content/50">Chưa có mô tả.</p>{{/if}}
+    {{> detail_images images=bug.images alt="Ảnh lỗi"}}
+  </section>
+  <section class="rounded-box border border-success/30 bg-success/5 p-4">
+    <h3 class="flex items-center gap-2 text-sm font-semibold text-success">
+      <span class="flex h-6 w-6 items-center justify-center rounded-full bg-success/15 text-xs" aria-hidden="true">✓</span>
+      Kết quả mong muốn
+      {{#if expected.images.length}}<span class="ml-auto text-xs font-normal text-base-content/60">{{expected.images.length}} ảnh</span>{{/if}}
+    </h3>
+    {{#if expected.text}}<p class="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed">{{expected.text}}</p>{{else}}<p class="mt-2 text-sm text-base-content/50">Chưa có mô tả.</p>{{/if}}
+    {{> detail_images images=expected.images alt="Ảnh mong muốn"}}
+  </section>
+</div>
+
+<!-- Vị trí lỗi: link trang + ảnh + file HAR -->
+{{#unless location.empty}}
+<section class="mt-4 rounded-box border border-base-content/10 p-4">
+  <h3 class="text-sm font-semibold">Vị trí lỗi</h3>
+  <div class="mt-2 flex flex-col gap-3 sm:flex-row sm:items-start">
+    {{#if location.image}}
+    <button type="button" data-zoom="{{location.image}}" class="block aspect-[4/3] w-full shrink-0 overflow-hidden rounded-btn border border-base-content/10 bg-white sm:w-48" title="Bấm để phóng to">
+      <img src="{{location.image}}" data-zoom="{{location.image}}" alt="Ảnh vị trí lỗi" loading="lazy" class="h-full w-full cursor-zoom-in object-contain">
+    </button>
+    {{/if}}
+    <div class="min-w-0 flex-1 space-y-2 text-sm">
+      {{#if location.url}}
+      <div class="flex items-center gap-2">
+        <code class="min-w-0 flex-1 truncate rounded-btn bg-base-200 px-2 py-1.5 text-xs" title="{{location.url}}">{{location.url}}</code>
+        {{#if location.isHttp}}<a href="{{location.url}}" target="_blank" rel="noopener noreferrer" class="btn btn-sm shrink-0">Mở trang ↗</a>{{/if}}
+      </div>
+      {{/if}}
+      {{#if location.har}}
+      <a href="{{location.har.url}}" download="{{location.har.name}}" class="btn btn-sm" title="Mở bằng DevTools › Network › Import">⇩ Tải file HAR · {{fmtSize location.har.size}}</a>
+      {{/if}}
+    </div>
+  </div>
+</section>
+{{/unless}}
+
+{{#if note}}
+<section class="mt-4 rounded-box border border-base-content/10 bg-base-200/50 p-4">
+  <h3 class="text-sm font-semibold">Ghi chú</h3>
+  <p class="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed">{{note}}</p>
+</section>
+{{/if}}

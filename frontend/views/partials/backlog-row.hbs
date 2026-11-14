@@ -1,17 +1,42 @@
-<tr data-item="{{json item}}" class="align-top hover:bg-slate-50{{#if done}} text-slate-500{{/if}}">
-  <td class="px-3 py-3">{{> project_cell project}}</td>
-  <td class="px-3 py-3">{{> type_chip}}</td>
-  <td class="px-3 py-3">{{> team_cell team}}</td>
-  <td class="px-3 py-3">{{> status_cell status}}</td>
-  <td class="break-words px-3 py-3 font-medium {{#if done}}text-slate-500{{else}}text-slate-900{{/if}}">{{#if title}}{{title}}{{else}}{{> dash}}{{/if}}</td>
-  <td class="px-3 py-3">{{> location_cell location}}</td>
-  <td class="px-3 py-3">{{> content_cell bug}}</td>
-  <td class="px-3 py-3">{{> content_cell expected}}</td>
-  <td class="px-3 py-3 text-slate-600">{{#if note}}{{> text_block text=note}}{{else}}{{> dash}}{{/if}}</td>
-  <td class="px-3 py-3">
-    <div class="flex justify-end gap-1">
-      <button type="button" data-act="edit" class="rounded px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100">Sửa</button>
-      <button type="button" data-act="delete" data-id="{{id}}" data-label="backlog #{{stt}}" class="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50">Xóa</button>
+{{!--
+  Một dòng backlog (chỉ xem): tóm tắt đủ để biết lỗi gì + cần làm gì.
+  Bấm tên hoặc "Chi tiết" → modal chi tiết (nội dung lấy từ <template data-detail>) có đổi trạng thái / giao việc nhanh.
+--}}
+<tr data-item="{{json item}}" class="hover align-top {{#if done}}opacity-60{{/if}}">
+  {{#unless scoped}}<td class="hidden md:table-cell">
+    {{#if project.code}}<span class="badge badge-ghost badge-sm">{{project.code}}</span>{{/if}}
+    <p class="mt-1 line-clamp-2 text-sm">{{project.name}}</p>
+  </td>{{/unless}}
+  <td>
+    <button type="button" data-detail-open class="block w-full text-left font-semibold leading-snug hover:text-primary" title="Xem chi tiết">
+      <span class="line-clamp-2"><span class="font-normal text-base-content/50">#{{stt}}</span> {{#if title}}{{title}}{{else}}Chưa đặt tên{{/if}}</span>
+    </button>
+    {{#if bugText}}<p class="mt-1 line-clamp-2 text-sm" title="{{bugText}}"><span class="font-medium text-error">Lỗi:</span> {{bugText}}</p>{{/if}}
+    {{#if expectedText}}<p class="mt-0.5 line-clamp-2 text-sm" title="{{expectedText}}"><span class="font-medium text-success">Mong muốn:</span> {{expectedText}}</p>{{/if}}
+    <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/60">
+      {{!-- Trên mobile các cột Trạng thái / Phụ trách bị ẩn → hiện gọn ở đây --}}
+      <span class="badge {{statusBadge}} badge-sm md:hidden">{{statusLabel}}</span>
+      <span class="md:hidden">{{#if teamName}}{{teamName}}{{else}}<span class="text-warning">Chưa phân công</span>{{/if}}{{#if assigneeName}} · {{assigneeName}}{{/if}}</span>
+      {{#unless scoped}}{{#if project.code}}<span class="badge badge-ghost badge-sm md:hidden">{{project.code}}</span>{{/if}}{{/unless}}
+      {{#if type}}<span class="badge badge-ghost badge-sm">{{type}}</span>{{/if}}
+      {{#if imageCount}}<span>📷 {{imageCount}} ảnh</span>{{/if}}
+      {{#if hasHar}}<span>⇩ HAR</span>{{/if}}
+      {{#if locationUrl}}<a href="{{locationUrl}}" target="_blank" rel="noopener noreferrer" class="link link-hover max-w-[16rem] truncate" title="{{locationUrl}}">🔗 {{locationUrl}}</a>{{/if}}
+      <span title="{{dateTime updatedAt}}">Cập nhật {{timeAgo updatedAt}}</span>
+    </div>
+    <template data-detail>{{> backlog_detail}}</template>
+  </td>
+  <td class="hidden md:table-cell">{{#if image}}<img src="{{image}}" data-zoom="{{image}}" alt="Ảnh backlog #{{stt}}" loading="lazy" class="h-14 w-20 cursor-zoom-in rounded-btn border border-base-content/10 object-cover object-top">{{else}}<span class="text-base-content/40">—</span>{{/if}}</td>
+  <td class="hidden text-sm md:table-cell">
+    <p class="truncate font-medium" title="{{teamName}}">{{#if teamName}}{{teamName}}{{else}}<span class="font-normal text-warning">Chưa phân công</span>{{/if}}</p>
+    <p class="truncate text-base-content/60" title="{{assigneeName}}">{{#if assigneeName}}{{assigneeName}}{{else}}Chưa giao người{{/if}}</p>
+  </td>
+  <td class="hidden md:table-cell"><span class="badge {{statusBadge}} whitespace-nowrap">{{statusLabel}}</span></td>
+  {{!-- Mobile: bấm tên để mở chi tiết (trong đó có "Sửa đầy đủ") → ẩn cột thao tác cho gọn --}}
+  <td class="hidden md:table-cell">
+    <div class="flex justify-end gap-1 whitespace-nowrap">
+      <button type="button" data-detail-open class="btn btn-sm">Chi tiết</button>
+      <button type="button" data-act="edit" data-form="feedback" class="btn btn-ghost btn-sm">Sửa</button>
     </div>
   </td>
 </tr>

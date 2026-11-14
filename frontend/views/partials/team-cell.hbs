@@ -1,6 +1,0 @@
-<select data-team-id="{{id}}" aria-label="Team xử lý backlog #{{stt}}"
-  class="w-full cursor-pointer rounded-md border px-2 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-200 {{#if hasTeam}}border-indigo-200 bg-indigo-50 text-indigo-700{{else}}border-dashed border-slate-300 bg-white text-slate-500{{/if}}">
-  <option value="">Chưa phân công</option>
-  {{> options}}
-</select>
-<p class="mt-1 text-xs text-slate-400" title="{{dateTime updatedAt}}">Cập nhật {{timeAgo updatedAt}}{{#if updatedBy}} · {{updatedBy}}{{/if}}</p>

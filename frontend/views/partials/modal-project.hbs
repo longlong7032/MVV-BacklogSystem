@@ -1,32 +1,80 @@
 <!-- Form thêm / sửa dự án -->
-<div id="projectModal" data-modal class="fixed inset-0 z-[45] hidden items-start justify-center overflow-y-auto bg-slate-900/50 p-4">
-  <form id="projectForm" class="my-16 w-full max-w-lg rounded-lg bg-white shadow-xl" novalidate>
-    <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-      <h2 data-title class="text-base font-semibold text-slate-900">Thêm dự án</h2>
-      <button type="button" data-close class="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Đóng">
+<div id="projectModal" data-modal class="modal" role="dialog" aria-modal="true">
+  <form id="projectForm" class="modal-box flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden p-0" novalidate>
+    <div class="flex shrink-0 items-center justify-between border-b border-base-content/10 px-5 py-4">
+      <h2 data-title class="text-base font-semibold">Thêm dự án</h2>
+      <button type="button" data-close class="btn btn-ghost btn-sm btn-square" aria-label="Đóng">
         <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 0 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z"/></svg>
       </button>
     </div>
-    <div class="space-y-4 px-5 py-5">
+    <div class="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
       <div class="grid gap-4 sm:grid-cols-[10rem_1fr]">
         <div>
-          <label for="pCode" class="mb-1 block text-sm font-medium text-slate-700">Mã dự án</label>
-          <input id="pCode" name="code" maxlength="30" autocomplete="off" placeholder="VD: KH01" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm uppercase focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
+          <label for="pCode" class="mb-1 block text-sm font-medium">Mã dự án</label>
+          <input id="pCode" name="code" maxlength="30" autocomplete="off" placeholder="VD: KH01" class="input input-bordered w-full uppercase">
         </div>
         <div>
-          <label for="pName" class="mb-1 block text-sm font-medium text-slate-700">Tên dự án</label>
-          <input id="pName" name="name" maxlength="120" autocomplete="off" required class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
+          <label for="pName" class="mb-1 block text-sm font-medium">Tên dự án</label>
+          <input id="pName" name="name" maxlength="120" autocomplete="off" required class="input input-bordered w-full">
         </div>
       </div>
       <div>
-        <label for="pDescription" class="mb-1 block text-sm font-medium text-slate-700">Mô tả <span class="font-normal text-slate-500">(không bắt buộc)</span></label>
-        <textarea id="pDescription" name="description" rows="3" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"></textarea>
+        <label for="pDescription" class="mb-1 block text-sm font-medium">Mô tả <span class="font-normal text-base-content/70">(không bắt buộc)</span></label>
+        <textarea id="pDescription" name="description" rows="3" class="textarea textarea-bordered w-full"></textarea>
       </div>
-      <p data-error class="hidden rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+      <div>
+        <label for="pTotalValue" class="mb-1 block text-sm font-medium">Tổng giá trị dự án (₫)</label>
+        <input id="pTotalValue" name="totalValue" type="number" min="0" step="1" value="0" class="input input-bordered w-full" placeholder="0">
+      </div>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div><label for="pStartDate" class="mb-1 block text-sm font-medium">Ngày bắt đầu</label><input id="pStartDate" name="startDate" type="date" class="input input-bordered w-full"></div>
+        <div><label for="pDeadline" class="mb-1 block text-sm font-medium">Deadline</label><input id="pDeadline" name="deadline" type="date" class="input input-bordered w-full"></div>
+      </div>
+      <fieldset>
+        <legend class="mb-1 text-sm font-medium">Nhân sự tham gia</legend>
+        {{#if memberOptions.length}}
+        <div class="grid max-h-48 gap-1 overflow-y-auto rounded-box border border-base-content/10 p-2 sm:grid-cols-2">
+          {{#each memberOptions}}
+          <label class="flex cursor-pointer items-center gap-2 rounded-btn px-2 py-1.5 text-sm hover:bg-base-200">
+            <input type="checkbox" name="memberIds" value="{{idPublic}}" class="checkbox checkbox-sm"> <span class="truncate">{{name}}</span>
+          </label>
+          {{/each}}
+        </div>
+        {{else}}
+        <p class="text-sm text-base-content/60">Chưa có người dùng nào. Thêm ở trang <a href="/users" class="link">Người dùng &amp; token</a>.</p>
+        {{/if}}
+      </fieldset>
+
+      <!-- Vai trò trong dự án: dùng làm "Loại" khi tạo backlog của dự án -->
+      <fieldset>
+        <legend class="text-sm font-medium">Vai trò trong dự án</legend>
+        <p class="mb-2 text-xs text-base-content/60">Các vai trò này là lựa chọn "Loại" khi tạo backlog của dự án (vd App customer, Website admin). Xóa hết nếu không dùng.</p>
+        <div data-roles class="space-y-2"></div>
+        <button type="button" data-role-add class="btn btn-sm btn-block mt-2 border-dashed border-base-content/20 bg-transparent font-normal shadow-none hover:bg-base-200">+ Thêm vai trò</button>
+      </fieldset>
+      <p data-error role="alert" class="alert alert-error hidden py-2 text-sm"></p>
     </div>
-    <div class="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
-      <button type="button" data-close class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Hủy</button>
-      <button type="submit" data-submit class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60">Lưu dự án</button>
+    <div class="flex shrink-0 items-center justify-end gap-2 border-t border-base-content/10 bg-base-200 px-5 py-3">
+      <button type="button" data-close class="btn btn-sm">Hủy</button>
+      <button type="submit" data-submit class="btn btn-primary btn-sm">Lưu dự án</button>
     </div>
   </form>
 </div>
+
+<!-- Mẫu một dòng vai trò (JS nhân bản, không tự dựng HTML) -->
+<template id="tplProjectRole">
+  <div data-role class="rounded-box border border-base-content/10 bg-base-200/50 p-3">
+    <div class="flex items-center justify-between">
+      <span data-role-index class="text-xs font-semibold uppercase tracking-wide text-base-content/60">Vai trò #1</span>
+      <button type="button" data-role-remove class="btn btn-ghost btn-xs">Xóa</button>
+    </div>
+    <label class="mt-2 block text-sm">
+      <span class="mb-1 block font-medium">Vai trò</span>
+      <input data-role-name maxlength="60" autocomplete="off" placeholder="VD: App customer" class="input input-bordered input-sm w-full">
+    </label>
+    <label class="mt-2 block text-sm">
+      <span class="mb-1 block font-medium">Mô tả quyền hạn / trách nhiệm</span>
+      <textarea data-role-description rows="2" maxlength="1000" placeholder="VD: Khách hàng dùng app để đặt hàng, thanh toán, theo dõi đơn." class="textarea textarea-bordered textarea-sm w-full"></textarea>
+    </label>
+  </div>
+</template>

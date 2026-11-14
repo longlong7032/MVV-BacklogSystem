@@ -1,0 +1,35 @@
+{{!-- Chi tiết tài liệu PTYC: đổi trạng thái (lưu ngay), danh sách phiên bản, tải phiên bản mới. Context = documentsModel(). --}}
+<div id="documentDetailModal" data-modal class="modal modal-bottom sm:modal-middle" role="dialog" aria-modal="true" aria-labelledby="documentDetailTitle">
+  <div class="modal-box flex max-h-[92dvh] w-full max-w-3xl flex-col overflow-hidden p-0">
+    <div class="flex items-start justify-between gap-3 border-b border-base-content/10 px-5 py-4">
+      <h2 id="documentDetailTitle" class="text-base font-semibold leading-snug">Tài liệu</h2>
+      <button type="button" data-close class="btn btn-ghost btn-sm btn-square -mr-2 -mt-1" aria-label="Đóng">✕</button>
+    </div>
+    <div class="min-h-0 flex-1 overflow-y-auto">
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-base-content/10 bg-base-200/60 px-5 py-4">
+        <span class="text-xs font-medium uppercase tracking-wide text-base-content/60">Trạng thái</span>
+        <div class="join" role="group" aria-label="Đổi trạng thái tài liệu">
+          {{#each form.statuses}}<button type="button" data-doc-status="{{key}}" class="btn btn-sm join-item whitespace-nowrap" aria-pressed="false">{{label}}</button>{{/each}}
+        </div>
+        <span data-doc-status-text role="status" class="text-xs text-base-content/60"></span>
+      </div>
+      <div id="documentDetailBody" class="px-5 py-5"></div>
+
+      <!-- Tải phiên bản mới -->
+      <form id="documentVersionForm" class="mx-5 mb-5 rounded-box border border-dashed border-base-content/20 p-4" novalidate>
+        <p class="text-sm font-semibold">Tải phiên bản mới</p>
+        <div class="mt-3 grid gap-3 sm:grid-cols-[1fr_8rem]">
+          <input name="document_file" type="file" required class="file-input file-input-bordered file-input-sm w-full" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.png,.jpg,.jpeg,.webp,.zip">
+          <input name="version" maxlength="30" placeholder="vd v2.0" class="input input-bordered input-sm w-full" aria-label="Tên phiên bản">
+        </div>
+        <input name="version_note" maxlength="1000" placeholder="Thay đổi trong phiên bản này (không bắt buộc)" class="input input-bordered input-sm mt-2 w-full" aria-label="Ghi chú phiên bản">
+        <p data-error role="alert" class="alert alert-error mt-2 hidden py-2 text-sm"></p>
+        <div class="mt-3 flex justify-end"><button type="submit" data-submit class="btn btn-primary btn-sm">Tải lên</button></div>
+      </form>
+    </div>
+    <div class="flex items-center justify-end gap-2 border-t border-base-content/10 bg-base-200 px-5 py-3">
+      <button type="button" data-close class="btn btn-sm">Đóng</button>
+      <button type="button" data-doc-edit class="btn btn-sm">Sửa thông tin</button>
+    </div>
+  </div>
+</div>

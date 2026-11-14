@@ -1,7 +1,7 @@
 {
   "name": "feedback-backlog-backend",
   "version": "2.0.0",
-  "description": "Feedback backlog — Backend: REST API, MCP, lưu trữ (Postgres / file JSON, R2). TypeScript + Express.",
+  "description": "Feedback backlog — Backend: REST API, MCP, Postgres (bảng thật, xóa mềm), file (R2 / bytea). TypeScript + Express.",
   "main": "dist/server.js",
   "type": "module",
   "private": true,
@@ -11,8 +11,8 @@
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "create-admin": "tsx src/scripts/create-admin.ts",
-    "migrate-to-pg": "tsx src/scripts/migrate-to-pg.ts",
-    "vercel-build": "npm run build"
+    "vercel-build": "npm run build",
+    "db:migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1165.0",

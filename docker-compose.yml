@@ -1,0 +1,25 @@
+# Postgres cho môi trường dev local (production dùng Neon — đặt DATABASE_URL trên Vercel).
+#   docker compose up -d        # chạy nền
+#   docker compose down         # dừng (dữ liệu giữ trong volume pgdata)
+#   docker compose down -v      # dừng và XÓA dữ liệu local
+# backend/.env:  DATABASE_URL=postgresql://feedback:feedback@localhost:5433/feedback
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: feedback
+      POSTGRES_PASSWORD: feedback
+      POSTGRES_DB: feedback
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U feedback -d feedback"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

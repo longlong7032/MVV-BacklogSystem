@@ -1,0 +1,77 @@
+{{!--
+  Danh sách tài liệu PTYC dùng chung cho trang /requirements và tab "Tài liệu PTYC" của dự án. Context = documentsModel().
+  [tab trạng thái + số lượng] → [tìm kiếm + dự án] → bảng → modal chi tiết (phiên bản, đổi trạng thái, tải bản mới) + form.
+--}}
+<div class="card border border-base-content/10 bg-base-100 shadow-sm">
+  <div class="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-base-content/10 px-4 pt-2">
+    <div role="tablist" class="tabs tabs-bordered -mb-px overflow-x-auto" aria-label="Lọc theo trạng thái">
+      {{#each tabs}}
+      <a href="{{href}}" role="tab" aria-selected="{{active}}" class="tab h-11 flex-nowrap gap-2 whitespace-nowrap {{#if active}}tab-active font-semibold{{/if}}">{{label}}
+        <span class="badge badge-sm {{#if active}}badge-primary{{else}}badge-ghost{{/if}}">{{count}}</span></a>
+      {{/each}}
+    </div>
+  </div>
+
+  <form method="get" action="{{formAction}}" class="grid grid-cols-1 items-center gap-2 border-b border-base-content/10 px-4 py-3 sm:flex sm:flex-wrap">
+    <input type="hidden" name="status" value="{{filterStatus}}">
+    {{#each fixedParams}}<input type="hidden" name="{{name}}" value="{{value}}">{{/each}}
+    <label class="input input-bordered input-sm flex min-w-0 flex-1 basis-64 items-center gap-2">
+      <svg class="h-4 w-4 shrink-0 opacity-60" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clip-rule="evenodd"/></svg>
+      <input name="q" value="{{q}}" type="search" placeholder="Tìm tên tài liệu, loại, tên file… (Enter)" autocomplete="off" class="min-w-0 grow" aria-label="Tìm tài liệu">
+    </label>
+    {{#unless scoped}}<select name="project" data-autosubmit class="select select-bordered select-sm w-full min-w-0 sm:w-auto sm:max-w-[16rem]" aria-label="Dự án">{{> options options=projectOptions}}</select>{{/unless}}
+    {{#if anyFilter}}<a href="{{clearHref}}" class="btn btn-ghost btn-sm">✕ Xóa lọc</a>{{/if}}
+  </form>
+
+  <div class="overflow-x-auto">
+    <table class="table w-full md:min-w-[820px] md:table-fixed">
+      <colgroup>
+        <col>
+        {{#unless scoped}}<col class="hidden md:table-column md:w-48">{{/unless}}
+        <col class="hidden md:table-column md:w-32">
+        <col class="hidden md:table-column md:w-32">
+        <col class="hidden md:table-column md:w-56">
+      </colgroup>
+      <thead>
+        <tr>
+          <th>Tài liệu</th>
+          {{#unless scoped}}<th class="hidden md:table-cell">Dự án</th>{{/unless}}
+          <th class="hidden md:table-cell">Phiên bản</th>
+          <th class="hidden md:table-cell">Trạng thái</th>
+          <th class="hidden text-right md:table-cell"><span class="sr-only">Thao tác</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each rows}}
+        <tr data-item="{{json item}}" class="hover align-top">
+          <td>
+            <button type="button" data-doc-open class="block w-full text-left font-semibold leading-snug hover:text-primary" title="Xem chi tiết"><span class="line-clamp-2">{{title}}</span></button>
+            <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-base-content/60">
+              <span class="badge {{statusBadge}} badge-sm md:hidden">{{statusLabel}}</span>
+              {{#if docType}}<span class="badge badge-ghost badge-sm">{{docType}}</span>{{/if}}
+              {{#if latest}}<span class="max-w-[18rem] truncate" title="{{latest.file.name}}">📄 {{latest.file.name}} · {{latest.sizeLabel}}</span>{{/if}}
+              {{#unless ../scoped}}<span class="md:hidden">{{projectLabel}}</span>{{/unless}}
+              <span title="{{dateTime updatedAt}}">Cập nhật {{timeAgo updatedAt}}</span>
+            </div>
+            <template data-detail>{{> document_detail}}</template>
+          </td>
+          {{#unless ../scoped}}<td class="hidden text-sm md:table-cell">{{#if projectHref}}<a href="{{projectHref}}" class="link link-hover line-clamp-2">{{projectLabel}}</a>{{else}}{{projectLabel}}{{/if}}</td>{{/unless}}
+          <td class="hidden text-sm md:table-cell">{{#if latest}}<span class="font-medium">{{latest.version}}</span><span class="block text-xs text-base-content/60">{{versionCount}} phiên bản</span>{{/if}}</td>
+          <td class="hidden md:table-cell"><span class="badge {{statusBadge}} whitespace-nowrap">{{statusLabel}}</span></td>
+          <td class="hidden md:table-cell">
+            <div class="flex justify-end gap-1 whitespace-nowrap">
+              {{#if latest}}<a href="{{latest.file.url}}" download="{{latest.file.name}}" class="btn btn-ghost btn-sm" title="Tải bản mới nhất">⇩ Tải</a>{{/if}}
+              <button type="button" data-doc-open class="btn btn-sm">Chi tiết</button>
+              <button type="button" data-act="edit" data-form="document" class="btn btn-ghost btn-sm">Sửa</button>
+            </div>
+          </td>
+        </tr>
+        {{else}}
+        <tr><td colspan="5" class="py-14 text-center text-base-content/60">{{empty}}</td></tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{> modal_document_detail}}
+{{> modal_document}}

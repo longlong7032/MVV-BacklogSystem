@@ -1,0 +1,53 @@
+{{!-- Tổng hợp đợt thanh toán của mọi dự án (chỉ xem). Thêm / sửa đợt trong tab "Thanh toán" của từng dự án. --}}
+<section class="space-y-4">
+  {{> page_header title="Thanh toán" subtitle="Tổng hợp tiền đã thu và còn phải thu của các dự án."}}
+
+  <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="stats border border-base-content/10 bg-base-100 shadow-sm"><div class="stat py-4"><div class="stat-title">Tổng giá trị dự án</div><div class="stat-value text-xl tabular-nums">{{stats.totalValue}} ₫</div><div class="stat-desc">{{stats.projectCount}} dự án</div></div></div>
+    <div class="stats border border-base-content/10 bg-base-100 shadow-sm"><div class="stat py-4"><div class="stat-title">Đã thu</div><div class="stat-value text-xl tabular-nums text-success">{{stats.collected}} ₫</div><div class="stat-desc">{{#if stats.hasTotal}}{{stats.collectedPct}}% tổng giá trị{{else}}Chưa nhập giá trị dự án{{/if}}</div></div></div>
+    <div class="stats border border-base-content/10 bg-base-100 shadow-sm"><div class="stat py-4"><div class="stat-title">Còn phải thu</div><div class="stat-value text-xl tabular-nums">{{stats.remaining}} ₫</div><div class="stat-desc">theo tổng giá trị dự án</div></div></div>
+    <div class="stats border border-base-content/10 bg-base-100 shadow-sm"><div class="stat py-4"><div class="stat-title">Đợt chưa thu</div><div class="stat-value text-xl tabular-nums {{#if stats.unpaidCount}}text-warning{{/if}}">{{stats.unpaidCount}}</div><div class="stat-desc">{{stats.unpaidAmount}} ₫</div></div></div>
+  </div>
+
+  <div class="card border border-base-content/10 bg-base-100 shadow-sm">
+    <div class="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-base-content/10 px-4 pt-2">
+      <div role="tablist" class="tabs tabs-bordered -mb-px overflow-x-auto" aria-label="Lọc theo trạng thái thu">
+        {{#each tabs}}<a href="{{href}}" role="tab" aria-selected="{{active}}" class="tab h-11 flex-nowrap gap-2 whitespace-nowrap {{#if active}}tab-active font-semibold{{/if}}">{{label}} <span class="badge badge-sm {{#if active}}badge-primary{{else}}badge-ghost{{/if}}">{{count}}</span></a>{{/each}}
+      </div>
+    </div>
+    <form method="get" action="/payments" class="grid grid-cols-1 items-center gap-2 border-b border-base-content/10 px-4 py-3 sm:flex sm:flex-wrap">
+      <input type="hidden" name="paid" value="{{filterPaid}}">
+      <label class="input input-bordered input-sm flex min-w-0 flex-1 basis-64 items-center gap-2">
+        <svg class="h-4 w-4 shrink-0 opacity-60" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clip-rule="evenodd"/></svg>
+        <input name="q" value="{{q}}" type="search" placeholder="Tìm tên đợt, ghi chú, dự án… (Enter)" autocomplete="off" class="min-w-0 grow" aria-label="Tìm đợt thanh toán">
+      </label>
+      <select name="project" data-autosubmit class="select select-bordered select-sm w-full min-w-0 sm:w-auto sm:max-w-[16rem]" aria-label="Dự án">{{> options options=projectOptions}}</select>
+      {{#if anyFilter}}<a href="/payments" class="btn btn-ghost btn-sm">✕ Xóa lọc</a>{{/if}}
+    </form>
+    <div class="overflow-x-auto">
+      <table class="table w-full md:min-w-[860px] md:table-fixed">
+        <colgroup><col class="md:w-52"><col><col class="md:w-36"><col class="md:w-28"><col class="md:w-28"><col class="md:w-20"><col class="md:w-24"></colgroup>
+        <thead><tr><th>Dự án</th><th>Đợt</th><th class="text-right">Số tiền</th><th>Ngày thu</th><th>Trạng thái</th><th>Biên nhận</th><th><span class="sr-only">Mở</span></th></tr></thead>
+        <tbody>
+          {{#each rows}}
+          <tr class="hover align-top">
+            <td class="text-sm"><a href="{{projectHref}}" class="link link-hover line-clamp-2">{{projectLabel}}</a></td>
+            <td>
+              <p class="font-medium"><span class="font-normal text-base-content/50">#{{stt}}</span> {{name}}</p>
+              {{#if note}}<p class="line-clamp-1 text-xs text-base-content/60" title="{{note}}">{{note}}</p>{{/if}}
+              {{#if companyAccount}}<p class="text-xs text-base-content/60">Tài khoản công ty{{#if hasInvoice}} · ✓ đã có việc hóa đơn{{/if}}</p>{{/if}}
+            </td>
+            <td class="text-right font-semibold tabular-nums">{{amountLabel}} ₫</td>
+            <td class="whitespace-nowrap text-base-content/70">{{dateLabel}}</td>
+            <td><span class="badge whitespace-nowrap {{#if paid}}badge-success badge-outline{{else}}badge-warning badge-outline{{/if}}">{{#if paid}}✓ Đã thu{{else}}Chưa thu{{/if}}</span></td>
+            <td>{{#if image}}<img src="{{image}}" data-zoom="{{image}}" alt="Biên nhận {{name}}" class="h-10 w-14 cursor-zoom-in rounded-btn border border-base-content/10 bg-white object-contain">{{else}}<span class="text-xs text-base-content/50">Chưa có</span>{{/if}}</td>
+            <td class="text-right"><a href="{{projectHref}}" class="btn btn-ghost btn-sm" title="Mở tab Thanh toán của dự án để sửa">Mở →</a></td>
+          </tr>
+          {{else}}
+          <tr><td colspan="7" class="py-14 text-center text-base-content/60">{{empty}}</td></tr>
+          {{/each}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>

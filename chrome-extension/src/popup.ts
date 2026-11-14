@@ -142,10 +142,10 @@ async function loadProjects(selectedId?: string): Promise<void> {
     const projects = await api<Project[]>('/api/projects');
     projects.sort((a, b) => a.name.localeCompare(b.name, 'vi'));
     select.innerHTML =
-      `<option value="">— Chọn dự án —</option>` + projects.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+      `<option value="">— Chọn dự án —</option>` + projects.map((p) => `<option value="${esc(p.idPublic)}">${esc(p.name)}</option>`).join('');
     if (!projects.length) select.innerHTML = `<option value="">Chưa có dự án – tạo trong trang backlog</option>`;
     const wanted =
-      selectedId && projects.some((p) => p.id === selectedId) ? selectedId : projects.length === 1 ? (projects[0]?.id ?? '') : '';
+      selectedId && projects.some((p) => p.idPublic === selectedId) ? selectedId : projects.length === 1 ? (projects[0]?.idPublic ?? '') : '';
     select.value = wanted;
     showError('');
   } catch (e) {

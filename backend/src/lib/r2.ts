@@ -1,7 +1,7 @@
 // Cloudflare R2 (tương thích S3): nơi lưu ảnh / file HAR thay cho bảng `files` trong Postgres.
 // Chỉ bật khi đủ các biến môi trường R2_*; thiếu một biến là tắt (app dùng Postgres/thư mục uploads như cũ).
 import { DeleteObjectsCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import type { StoredFile, StoredUpload } from './store.js';
+import type { StoredFile, StoredUpload } from './blobs.js';
 
 /** Giao diện kho file (blob) mà driver Postgres dùng khi bật R2. */
 interface BlobStore {

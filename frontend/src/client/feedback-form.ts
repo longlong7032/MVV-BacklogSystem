@@ -5,18 +5,18 @@
  * Server đã render sẵn mọi lựa chọn (dự án, team, loại, trạng thái) và mẫu ảnh xem trước (`<template>`);
  * code ở đây chỉ điền giá trị, bật/tắt trạng thái chọn và gửi dữ liệu.
  */
-import type { Feedback } from '../types.js';
+import type { Feedback, Project, ProjectRole } from '../types.js';
 import { api } from './api.js';
 import { $, $$, closest, data, errorMessage, isOpen, maybe, openModal, setError, showToast } from './dom.js';
 import type { Field } from './dom.js';
-import { openProjectForm, registerForm } from './crud.js';
+import { registerForm } from './crud.js';
 
 /** Số ảnh tối đa mỗi vùng ảnh (khớp giới hạn của server). */
 const MAX_IMAGES = 10;
 /** Class đánh dấu vùng ảnh đang nhận Ctrl+V. */
-const ZONE_ACTIVE = ['border-indigo-300', 'bg-indigo-50/40'];
+const ZONE_ACTIVE = ['border-primary/40', 'bg-primary/5'];
 /** Class đánh dấu ô thả file khi đang kéo ảnh vào. */
-const DROP_ACTIVE = ['border-indigo-500', 'bg-indigo-50'];
+const DROP_ACTIVE = ['border-primary', 'bg-primary/10'];
 /** Khóa localStorage lưu lựa chọn lần trước (dự án / loại / team) để nhập nhanh. */
 const DEFAULTS_KEY = 'backlogDefaults';
 
@@ -110,6 +110,7 @@ export function initFeedbackForm(): void {
     project: $<Field>('#fProject'),
     status: $<Field>('#fStatus'),
     team: $<Field>('#fTeam'),
+    assignee: $<Field>('#fAssignee'),
     type: $<Field>('#fType'),
     title: $<Field>('#fTitle'),
     note: $<Field>('#fNote'),
@@ -121,6 +122,10 @@ export function initFeedbackForm(): void {
   const metaBox = $<HTMLDetailsElement>('#fMeta');
   const errorBox = $('#formError');
   const nextStt = JSON.parse(form.dataset.nextStt ?? '{}') as Record<string, number>;
+  /** Dự án theo id (kèm vai trò): "Loại" của backlog chọn trong vai trò của dự án đang chọn. */
+  const projects = JSON.parse(form.dataset.projects ?? '{}') as Record<string, Project>;
+  const rolesOf = (projectId: string): ProjectRole[] => projects[projectId]?.roles ?? [];
+  const hasRole = (projectId: string, type: string): boolean => rolesOf(projectId).some((r) => r.name.toLowerCase() === type.trim().toLowerCase());
   let editing: Feedback | null = null;
   /** Đã lưu ít nhất một backlog khi đang "Lưu & thêm tiếp" -> tải lại trang khi đóng form để thấy danh sách mới. */
   let dirty = false;
@@ -222,18 +227,43 @@ export function initFeedbackForm(): void {
           selectedLabel(f.project),
           f.type.value.trim() || 'Chưa chọn loại',
           selectedLabel(f.team) || 'Chưa phân công',
+          selectedLabel(f.assignee) || 'Chưa giao người xử lý',
           selectedLabel(f.status),
         ].join(' · ')
       : '⚠ Chưa chọn dự án';
-    summary.classList.toggle('text-red-600', !projectId);
-    summary.classList.toggle('text-slate-700', Boolean(projectId));
+    summary.classList.toggle('text-error', !projectId);
+      };
+
+  /**
+   * Dựng chip "Loại" theo vai trò của dự án đang chọn (nhân bản <template id="tplTypeChip">).
+   * Backlog cũ có loại không còn trong vai trò vẫn hiện thêm chip "(cũ)" để không mất dữ liệu.
+   */
+  const renderTypeChips = (): void => {
+    const projectId = f.project.value;
+    const roles = rolesOf(projectId);
+    const current = f.type.value.trim();
+    const items: Array<{ name: string; title: string; legacy?: boolean }> = roles.map((r) => ({ name: r.name, title: r.description }));
+    if (current && !hasRole(projectId, current)) items.push({ name: current, title: 'Loại cũ, không còn trong vai trò của dự án', legacy: true });
+    const tpl = $<HTMLTemplateElement>('#tplTypeChip');
+    $('#typeChips').replaceChildren(
+      ...items.map((r) => {
+        const chip = tpl.content.firstElementChild!.cloneNode(true) as HTMLElement;
+        chip.dataset.chipType = r.name;
+        chip.textContent = r.legacy ? `${r.name} (cũ)` : r.name;
+        chip.title = r.title;
+        return chip;
+      })
+    );
+    const hint = $('#typeHint');
+    hint.textContent = !projectId ? 'Chọn dự án trước để chọn loại.' : roles.length ? '' : 'Dự án chưa khai báo vai trò (khai báo trong Sửa dự án).';
+    hint.classList.toggle('hidden', !hint.textContent);
   };
 
   /** Bật `aria-pressed` cho chip khớp giá trị hiện tại của form (CSS lo phần tô màu). */
   const syncChips = (): void => {
+    renderTypeChips();
     const type = f.type.value.trim().toLowerCase();
     $$('[data-chip-type]').forEach((c) => c.setAttribute('aria-pressed', String(data(c, 'chipType').toLowerCase() === type)));
-    $$('[data-chip-team]').forEach((c) => c.setAttribute('aria-pressed', String(data(c, 'chipTeam') === f.team.value)));
     $$('[data-chip-status]').forEach((c) => c.setAttribute('aria-pressed', String(data(c, 'chipStatus') === f.status.value)));
     updateMetaSummary();
   };
@@ -247,6 +277,11 @@ export function initFeedbackForm(): void {
     setError(errorBox, '');
     $('#modalTitle').textContent = item ? `Sửa backlog #${item.stt}` : 'Thêm backlog';
     $('#btnSaveNew').classList.toggle('hidden', Boolean(item)); // "Lưu & thêm tiếp" chỉ khi thêm mới
+    // Nút Xóa chỉ có khi sửa backlog có sẵn (crud.ts xử lý xác nhận + gọi DELETE)
+    const deleteBtn = $('#btnDeleteBacklog');
+    deleteBtn.classList.toggle('hidden', !item);
+    deleteBtn.dataset.id = item?.idPublic ?? '';
+    deleteBtn.dataset.label = item ? `backlog #${item.stt}` : '';
 
     const d = loadDefaults();
     const optionCount = (f.project as HTMLSelectElement).options.length - 1; // trừ dòng "— Chọn dự án —"
@@ -257,7 +292,9 @@ export function initFeedbackForm(): void {
         (optionCount === 1 ? ((f.project as HTMLSelectElement).options[1]?.value ?? '') : '');
     f.status.value = item ? item.status : 'todo';
     f.team.value = item ? item.teamId : form.dataset.currentTeam || (d.team && hasOption(f.team, d.team) ? d.team : '');
-    f.type.value = item ? item.type : d.type || '';
+    f.assignee.value = item ? item.assigneeId || '' : '';
+    // Thêm mới: chỉ dùng lại loại lần trước nếu nó là vai trò của dự án đang chọn
+    f.type.value = item ? item.type : d.type && hasRole(f.project.value, d.type) ? d.type : '';
     f.title.value = item ? item.title : '';
     f.note.value = item ? item.note : '';
     noteBox.open = Boolean(item && item.note);
@@ -286,7 +323,8 @@ export function initFeedbackForm(): void {
     syncChips();
     updateSttHint();
     setActiveZone('bug');
-    metaBox.open = !f.project.value; // chưa có dự án -> mở sẵn phần phân loại
+    // Desktop: cột phân loại luôn hiện. Mobile: chỉ mở sẵn khi chưa có dự án (nhập nhanh với lựa chọn đã nhớ)
+    metaBox.open = matchMedia('(min-width: 768px)').matches || !f.project.value;
     openModal(modal);
     (f.project.value ? f.title : f.project).focus();
   };
@@ -336,6 +374,7 @@ export function initFeedbackForm(): void {
     fd.set('project_id', projectId);
     fd.set('status', f.status.value);
     fd.set('team_id', f.team.value);
+    fd.set('assignee_id', f.assignee.value);
     fd.set('type', f.type.value);
     fd.set('title', f.title.value);
     fd.set('note_text', f.note.value);
@@ -375,7 +414,7 @@ export function initFeedbackForm(): void {
     buttons.forEach((b) => (b.disabled = true));
     btn.textContent = 'Đang lưu...';
     try {
-      const saved = await api<Feedback>(editing ? `/api/feedbacks/${editing.id}` : '/api/feedbacks', {
+      const saved = await api<Feedback>(editing ? `/api/feedbacks/${editing.idPublic}` : '/api/feedbacks', {
         method: editing ? 'PUT' : 'POST',
         body: fd,
       });
@@ -399,37 +438,25 @@ export function initFeedbackForm(): void {
   /* ---------- Sự kiện trong form ---------- */
 
   f.project.addEventListener('change', () => {
+    // Đổi dự án: loại đang chọn không thuộc vai trò của dự án mới thì bỏ chọn
+    if (f.type.value && !hasRole(f.project.value, f.type.value)) f.type.value = '';
     updateSttHint();
-    updateMetaSummary();
+    syncChips();
   });
+
+  f.assignee.addEventListener('change', updateMetaSummary);
+  f.team.addEventListener('change', updateMetaSummary);
   f.type.addEventListener('input', syncChips);
 
   // Chọn nhanh bằng một chạm (bấm lại chip loại để bỏ chọn)
   $('#fMeta').addEventListener('click', (e) => {
     const type = closest(e, '[data-chip-type]');
-    const team = closest(e, '[data-chip-team]');
     const status = closest(e, '[data-chip-status]');
     if (type) f.type.value = f.type.value.trim().toLowerCase() === data(type, 'chipType').toLowerCase() ? '' : data(type, 'chipType');
-    else if (team) f.team.value = data(team, 'chipTeam');
     else if (status) f.status.value = data(status, 'chipStatus');
     else return;
     syncChips();
   });
-
-  // "+ Dự án mới": tạo dự án rồi chọn luôn nó trong form này (không tải lại trang)
-  $('#btnQuickProject').addEventListener('click', () =>
-    openProjectForm((project: { id: string; name: string; code?: string }) => {
-      const select = f.project as HTMLSelectElement;
-      select.add(new Option(project.code ? `${project.code} - ${project.name}` : project.name, project.id));
-      select.value = project.id;
-      nextStt[project.id] = 1;
-      dirty = true;
-      updateSttHint();
-      updateMetaSummary();
-      metaBox.open = true; // giữ mở để chọn tiếp loại / team
-      f.title.focus();
-    })
-  );
 
   // Ô tải file HAR
   $('#fHarPick').addEventListener('click', () => $<HTMLInputElement>('#fHarInput').click());

@@ -7,6 +7,7 @@
 import { api, jsonBody } from './api.js';
 import { $, closeModal, closest, data, errorMessage, itemOf, maybe, openModal, setError } from './dom.js';
 import type { Field } from './dom.js';
+import { alertDialog, confirmDialog } from './dialog.js';
 
 /** Hàm mở một form (null = thêm mới, đối tượng = sửa). */
 type Opener = (item: any) => void;
@@ -20,10 +21,10 @@ export const registerForm = (kind: string, open: Opener): void => {
 };
 
 /** Tên form tương ứng với từng trang (dùng cho nút "Sửa" trên dòng). */
-const FORM_OF_TAB: Record<string, string> = { backlog: 'feedback', projects: 'project', teams: 'team', users: 'user' };
+const FORM_OF_TAB: Record<string, string> = { backlog: 'feedback', projects: 'project', teams: 'team', users: 'user', requirements: 'document' };
 
 /** Mô tả một form đơn giản (một modal, gửi JSON tới `/api/<resource>`). */
-export interface SimpleFormSpec<T extends { id: string }> {
+export interface SimpleFormSpec<T extends { idPublic: string }> {
   /** Id của modal. */
   modal: string;
   /** Id của form. */
@@ -53,7 +54,7 @@ export interface SimpleForm<T> {
  * Dựng điều khiển cho một form đơn giản và gắn sự kiện gửi form.
  * Sau khi lưu thành công: gọi `onSaved` nếu có, mặc định tải lại trang.
  */
-export function simpleForm<T extends { id: string }>(spec: SimpleFormSpec<T>): SimpleForm<T> {
+export function simpleForm<T extends { idPublic: string }>(spec: SimpleFormSpec<T>): SimpleForm<T> {
   const modal = $(`#${spec.modal}`);
   const form = $<HTMLFormElement>(`#${spec.form}`);
   const errorBox = $('[data-error]', form);
@@ -71,7 +72,7 @@ export function simpleForm<T extends { id: string }>(spec: SimpleFormSpec<T>): S
     submitBtn.disabled = true;
     submitBtn.textContent = 'Đang lưu...';
     try {
-      const url = editing ? `/api/${spec.resource}/${editing.id}` : `/api/${spec.resource}`;
+      const url = editing ? `/api/${spec.resource}/${editing.idPublic}` : `/api/${spec.resource}`;
       const result = await api(url, jsonBody(editing ? 'PUT' : 'POST', body));
       const wasEditing = editing;
       closeModal(modal);
@@ -110,18 +111,52 @@ export const setField = (form: HTMLFormElement, name: string, value: string): vo
 
 /** Dữ liệu của dự án / team (đủ để điền form). */
 interface Named {
-  id: string;
+  idPublic: string;
   name: string;
   code?: string;
   lead?: string;
   description?: string;
+  totalValue?: number;
+  startDate?: string;
+  deadline?: string;
+  memberIds?: string[];
+  roles?: Array<{ name: string; description: string }>;
 }
+
+/* ---------- Vai trò trong dự án (danh sách dòng nhân bản từ <template id="tplProjectRole">) ---------- */
+
+/** Đánh số lại "Vai trò #n" sau khi thêm / xóa. */
+const renumberRoles = (form: HTMLFormElement): void =>
+  form.querySelectorAll<HTMLElement>('[data-role]').forEach((row, i) => {
+    const label = row.querySelector('[data-role-index]');
+    if (label) label.textContent = `Vai trò #${i + 1}`;
+  });
+
+/** Thêm một dòng vai trò (có thể điền sẵn). */
+const addRoleRow = (form: HTMLFormElement, role: { name: string; description: string } = { name: '', description: '' }, focus = false): void => {
+  const tpl = document.querySelector<HTMLTemplateElement>('#tplProjectRole');
+  const list = form.querySelector('[data-roles]');
+  if (!tpl || !list) return;
+  const row = (tpl.content.firstElementChild as HTMLElement).cloneNode(true) as HTMLElement;
+  row.querySelector<HTMLInputElement>('[data-role-name]')!.value = role.name;
+  row.querySelector<HTMLTextAreaElement>('[data-role-description]')!.value = role.description;
+  list.append(row);
+  renumberRoles(form);
+  if (focus) row.querySelector<HTMLInputElement>('[data-role-name]')?.focus();
+};
+
+/** Đọc các vai trò đang nhập (bỏ dòng trống hoàn toàn). */
+const collectRoles = (form: HTMLFormElement): Array<{ name: string; description: string }> =>
+  [...form.querySelectorAll<HTMLElement>('[data-role]')]
+    .map((row) => ({
+      name: row.querySelector<HTMLInputElement>('[data-role-name]')?.value.trim() ?? '',
+      description: row.querySelector<HTMLTextAreaElement>('[data-role-description]')?.value.trim() ?? '',
+    }))
+    .filter((r) => r.name || r.description);
 
 /** Form dự án và form team (chỉ dựng khi trang có modal tương ứng). */
 let projectForm: SimpleForm<Named> | null = null;
 
-/** Mở form dự án; `onSaved` dùng khi mở từ form backlog (không tải lại trang). */
-export const openProjectForm = (onSaved?: (project: any) => void): void => projectForm?.open(null, onSaved);
 
 /** Gắn các form dự án / team và hành vi thêm / sửa / xóa trên trang. */
 export function initCrud(): void {
@@ -136,13 +171,43 @@ export function initCrud(): void {
         setField(form, 'code', p?.code ?? '');
         setField(form, 'name', p?.name ?? '');
         setField(form, 'description', p?.description ?? '');
+        setField(form, 'totalValue', String(p?.totalValue ?? 0));
+        setField(form, 'startDate', p?.startDate ?? '');
+        setField(form, 'deadline', p?.deadline ?? '');
+        const selectedMembers = new Set(p?.memberIds ?? []);
+        form.querySelectorAll<HTMLInputElement>('input[name="memberIds"]').forEach((box) => (box.checked = selectedMembers.has(box.value)));
+        form.querySelector('[data-roles]')?.replaceChildren();
+        const roles = p?.roles ?? [];
+        if (roles.length) roles.forEach((r) => addRoleRow(form, r));
+        else addRoleRow(form); // dự án mới / chưa có vai trò: sẵn một dòng trống để nhập
       },
-      collect: (form) =>
-        field(form, 'name')
-          ? { code: field(form, 'code'), name: field(form, 'name'), description: field(form, 'description') }
-          : 'Vui lòng nhập tên dự án.',
+      collect: (form) => {
+        if (!field(form, 'name')) return 'Vui lòng nhập tên dự án.';
+        const startDate = field(form, 'startDate');
+        const deadline = field(form, 'deadline');
+        if (startDate && deadline && deadline < startDate) return 'Deadline phải bằng hoặc sau ngày bắt đầu.';
+        const roles = collectRoles(form);
+        if (roles.some((r) => !r.name)) return 'Vai trò có mô tả nhưng chưa nhập tên vai trò.';
+        return {
+          code: field(form, 'code'), name: field(form, 'name'), description: field(form, 'description'),
+          totalValue: Number(field(form, 'totalValue') || 0), startDate, deadline,
+          memberIds: [...form.querySelectorAll<HTMLInputElement>('input[name="memberIds"]:checked')].map((box) => box.value),
+          roles,
+        };
+      },
     });
     registerForm('project', (item) => projectForm?.open(item));
+
+    // Thêm / xóa dòng vai trò
+    const pForm = $<HTMLFormElement>('#projectForm');
+    pForm.addEventListener('click', (e) => {
+      if (closest(e, '[data-role-add]')) return addRoleRow(pForm, undefined, true);
+      const remove = closest(e, '[data-role-remove]');
+      if (remove) {
+        remove.closest('[data-role]')?.remove();
+        renumberRoles(pForm);
+      }
+    });
   }
 
   if (maybe('#teamModal')) {
@@ -175,7 +240,8 @@ export function initCrud(): void {
 
     // Nút "Sửa" trên dòng / thẻ: mở form tương ứng với dữ liệu của dòng
     if (data(act, 'act') === 'edit') {
-      const kind = FORM_OF_TAB[document.body.dataset.tab ?? ''];
+      // Ưu tiên form ghi trên nút (vd backlog nằm trong trang dự án); không có thì theo trang đang mở
+      const kind = data(act, 'form') || FORM_OF_TAB[document.body.dataset.tab ?? ''];
       const item = itemOf(act);
       if (kind && item) openers.get(kind)?.(item);
       return;
@@ -184,12 +250,13 @@ export function initCrud(): void {
     // Nút "Xóa": hỏi xác nhận rồi gọi DELETE
     if (data(act, 'act') === 'delete') {
       const warn = data(act, 'warn');
-      if (!confirm(`Xóa ${data(act, 'label')}?${warn ? `\n\n${warn}` : ''}`)) return;
+      const ok = await confirmDialog({ title: `Xóa ${data(act, 'label')}?`, message: warn || 'Hành động này không thể hoàn tác.', confirmLabel: 'Xóa', danger: true });
+      if (!ok) return;
       try {
         await api(`/api/${data(act, 'resource') || 'feedbacks'}/${data(act, 'id')}`, { method: 'DELETE' });
         location.reload();
       } catch (err) {
-        alert(errorMessage(err));
+        await alertDialog(errorMessage(err), 'Không xóa được');
       }
     }
   });

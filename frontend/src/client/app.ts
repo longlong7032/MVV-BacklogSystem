@@ -9,15 +9,21 @@
  */
 import { initBacklogList } from './backlog-list.js';
 import { initCrud } from './crud.js';
+import { initDialog } from './dialog.js';
+import { initDocuments } from './documents.js';
 import { initFeedbackForm } from './feedback-form.js';
 import { initMcp } from './mcp.js';
+import { initPaymentRounds } from './payment-rounds.js';
 import { initUi } from './ui.js';
 import { initUsers } from './users.js';
 
 // Thứ tự quan trọng: crud đăng ký form dự án/team trước, form backlog và người dùng đăng ký sau
+initDialog();
 initUi();
 initCrud();
 initFeedbackForm();
 initUsers();
 initBacklogList();
 initMcp();
+initPaymentRounds();
+initDocuments();

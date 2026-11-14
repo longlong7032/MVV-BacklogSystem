@@ -1,9 +1,7 @@
-{{#if empty}}<span class="text-slate-400">{{emptyText}}</span>{{else}}
+{{#if empty}}<span class="text-sm text-base-content/50">{{emptyText}}</span>{{else}}
 <div class="flex items-center gap-2">
-  <div class="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
-    <div class="h-full rounded-full bg-emerald-500" style="width:{{pct}}%"></div>
-  </div>
-  <span class="w-10 text-right text-xs font-medium text-slate-600">{{pct}}%</span>
+  <progress class="progress progress-primary flex-1" value="{{pct}}" max="100" aria-label="{{pct}}% hoàn thành"></progress>
+  <span class="w-10 text-right text-sm font-medium text-base-content/70">{{pct}}%</span>
 </div>
-<p class="mt-1 text-xs text-slate-500">{{done}}/{{total}} hoàn thành · {{todo}} chưa làm{{#if doing}} · {{doing}} đang làm{{/if}}</p>
+<p class="mt-1 text-sm text-base-content/70">{{done}}/{{total}} hoàn thành · {{todo}} chưa làm{{#if doing}} · {{doing}} đang làm{{/if}}</p>
 {{/if}}

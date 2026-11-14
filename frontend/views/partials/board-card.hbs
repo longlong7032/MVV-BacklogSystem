@@ -1,14 +1,23 @@
-<article draggable="true" data-card="{{id}}" data-item="{{json item}}" class="cursor-grab rounded-md border border-slate-200 bg-white p-3 shadow-sm hover:shadow active:cursor-grabbing">
-  <div class="flex items-center justify-between gap-2 text-xs">
-    <span class="truncate font-medium text-slate-700">{{projectLabel}} · #{{stt}}</span>
-    <button type="button" data-act="edit" class="shrink-0 font-medium text-indigo-600 hover:text-indigo-800">Sửa</button>
-  </div>
-  {{#if type}}<span class="mt-2 inline-block max-w-full truncate rounded bg-sky-50 px-1.5 py-0.5 text-xs font-medium text-sky-700">{{type}}</span>{{/if}}
-  {{#if title}}<p class="mt-2 line-clamp-2 break-words text-sm font-semibold text-slate-900">{{title}}</p>{{/if}}
-  <p class="mt-1 line-clamp-3 whitespace-pre-wrap break-words text-sm text-slate-700">{{#if bugText}}{{bugText}}{{else}}<span class="text-slate-400">(không có mô tả)</span>{{/if}}</p>
-  {{#if image}}<img src="{{image}}" data-zoom="{{image}}" alt="" loading="lazy" class="mt-2 h-24 w-full cursor-zoom-in rounded border border-slate-200 object-cover">{{/if}}
-  <div class="mt-3 flex items-center justify-between gap-2 text-xs text-slate-500">
-    {{#if teamName}}<span class="truncate rounded bg-indigo-50 px-1.5 py-0.5 font-medium text-indigo-700">{{teamName}}</span>{{else}}<span class="text-slate-400">Chưa phân công</span>{{/if}}
-    <span class="shrink-0">{{timeAgo updatedAt}}</span>
+{{!-- Thẻ Kanban: kéo sang cột khác để đổi trạng thái; bấm tên để xem chi tiết. --}}
+<article draggable="true" data-card="{{id}}" data-item="{{json item}}" class="card card-compact cursor-grab border border-base-content/10 bg-base-100 shadow-sm transition hover:shadow-md active:cursor-grabbing">
+  <div class="card-body gap-2">
+    <div class="flex items-center justify-between gap-2 text-xs text-base-content/60">
+      <span class="truncate">{{projectLabel}} · #{{stt}}</span>
+      {{#if type}}<span class="badge badge-ghost badge-sm max-w-[50%]"><span class="truncate">{{type}}</span></span>{{/if}}
+    </div>
+    <button type="button" data-detail-open class="text-left text-sm font-semibold leading-snug hover:text-primary" title="Xem chi tiết">
+      <span class="line-clamp-2">{{#if title}}{{title}}{{else}}Chưa đặt tên{{/if}}</span>
+    </button>
+    {{#if bugText}}<p class="line-clamp-2 break-words text-sm"><span class="font-medium text-error">Lỗi:</span> {{bugText}}</p>{{/if}}
+    {{#if expectedText}}<p class="line-clamp-2 break-words text-sm"><span class="font-medium text-success">Mong muốn:</span> {{expectedText}}</p>{{/if}}
+    {{#if image}}<img src="{{image}}" data-zoom="{{image}}" alt="Ảnh backlog #{{stt}}" loading="lazy" class="h-24 w-full cursor-zoom-in rounded-btn border border-base-content/10 object-cover object-top">{{/if}}
+    <div class="flex items-center justify-between gap-2 border-t border-base-content/10 pt-2 text-xs text-base-content/60">
+      <span class="truncate">{{#if teamName}}{{teamName}}{{else}}<span class="text-warning">Chưa phân công</span>{{/if}}{{#if assigneeName}} · {{assigneeName}}{{/if}}</span>
+      <span class="flex shrink-0 gap-1">
+        <button type="button" data-detail-open class="btn btn-ghost btn-xs">Chi tiết</button>
+        <button type="button" data-act="edit" data-form="feedback" class="btn btn-ghost btn-xs">Sửa</button>
+      </span>
+    </div>
+    <template data-detail>{{> backlog_detail}}</template>
   </div>
 </article>

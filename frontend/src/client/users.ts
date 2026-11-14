@@ -4,6 +4,7 @@
  */
 import { api, jsonBody } from './api.js';
 import { $, $$, closest, data, errorMessage, maybe, openModal, setError } from './dom.js';
+import { alertDialog, confirmDialog } from './dialog.js';
 import type { Field } from './dom.js';
 import { field, registerForm, setField, simpleForm } from './crud.js';
 import type { PublicUser } from '../types.js';
@@ -70,20 +71,24 @@ export function initUsers(): void {
     const name = data(btn, 'name');
     try {
       if (data(btn, 'act') === 'token') {
-        const ask =
-          data(btn, 'hasToken') === 'true'
-            ? `Cấp lại token cho "${name}"?\n\nToken cũ sẽ mất hiệu lực ngay lập tức.`
-            : `Cấp token cho "${name}"?`;
-        if (!confirm(ask)) return;
+        const reissue = data(btn, 'hasToken') === 'true';
+        const ok = await confirmDialog({
+          title: reissue ? `Cấp lại token cho "${name}"?` : `Cấp token cho "${name}"?`,
+          message: reissue ? 'Token cũ sẽ mất hiệu lực ngay lập tức.' : 'Token chỉ hiển thị một lần sau khi cấp.',
+          confirmLabel: reissue ? 'Cấp lại token' : 'Cấp token',
+          danger: reissue,
+        });
+        if (!ok) return;
         const result = await api(`/api/users/${id}/token`, { method: 'POST' });
         showToken(result.user, result.token);
       } else {
-        if (!confirm(`Thu hồi token của "${name}"?\n\nNgười này sẽ không kết nối MCP được nữa cho đến khi được cấp token mới.`)) return;
+        const ok = await confirmDialog({ title: `Thu hồi token của "${name}"?`, message: 'Người này sẽ không kết nối MCP được nữa cho đến khi được cấp token mới.', confirmLabel: 'Thu hồi', danger: true });
+        if (!ok) return;
         await api(`/api/users/${id}/token`, { method: 'DELETE' });
         location.reload();
       }
     } catch (err) {
-      alert(errorMessage(err));
+      await alertDialog(errorMessage(err));
     }
   });
 }

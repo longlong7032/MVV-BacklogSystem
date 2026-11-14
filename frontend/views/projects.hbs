@@ -1,56 +1,33 @@
 <section>
-  <div class="rounded-lg border border-slate-200 bg-white shadow-sm">
-    <div class="flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-4">
-      <form method="get" action="/projects" data-autosubmit>
-        <input name="q" value="{{q}}" type="search" placeholder="Tìm dự án..."
-          class="w-60 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
-      </form>
-      <p class="text-sm text-slate-500">{{summary}}</p>
-      <button type="button" data-open-form="project"
-        class="ml-auto inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-300">
-        <span aria-hidden="true" class="text-base leading-none">+</span> Thêm dự án
-      </button>
-    </div>
-    <div class="overflow-x-auto">
-      <table class="w-full min-w-[860px] table-fixed border-collapse text-left text-sm">
-        <colgroup>
-          <col>
-          <col class="w-72">
-          <col class="w-32">
-          <col class="w-52">
-        </colgroup>
-        <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-          <tr>
-            <th class="px-3 py-3 font-semibold">Dự án</th>
-            <th class="px-3 py-3 font-semibold">Tiến độ backlog</th>
-            <th class="px-3 py-3 font-semibold">Ngày tạo</th>
-            <th class="px-3 py-3 text-right font-semibold">Thao tác</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-slate-200">
-          {{#each rows}}
-          <tr data-item="{{json item}}" class="align-top hover:bg-slate-50">
-            <td class="px-3 py-3">
-              {{#if code}}<span class="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-xs font-semibold text-slate-700">{{code}}</span>{{/if}}
-              <p class="break-words font-medium text-slate-900">{{name}}</p>
-              {{#if description}}<p class="mt-1 whitespace-pre-wrap break-words text-slate-500">{{description}}</p>{{/if}}
-            </td>
-            <td class="px-3 py-3">{{> progress progress}}</td>
-            <td class="px-3 py-3 text-slate-500">{{fmtDate createdAt}}</td>
-            <td class="px-3 py-3">
-              <div class="flex justify-end gap-1">
-                <a href="{{backlogHref}}" class="rounded px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50">Xem backlog</a>
-                <button type="button" data-act="edit" class="rounded px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100">Sửa</button>
-                <button type="button" data-act="delete" data-id="{{id}}" data-resource="projects" data-label="dự án &quot;{{name}}&quot;" data-warn="Toàn bộ backlog (kèm ảnh) của dự án này cũng sẽ bị xóa và không thể khôi phục." class="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50">Xóa</button>
-              </div>
-            </td>
-          </tr>
-          {{else}}{{> table_message colspan=4 message=empty}}{{/each}}
-        </tbody>
-      </table>
-    </div>
+  {{#> page_header title="Dự án" extra=summary subtitle="Không gian làm việc tập trung cho từng dự án."}}
+    <button type="button" data-open-form="project" class="btn btn-primary btn-sm"><span aria-hidden="true">+</span> Tạo dự án</button>
+  {{/page_header}}
+  <div class="mb-4">{{> search_box action="/projects" q=q placeholder="Tìm theo tên hoặc mã dự án"}}</div>
+  <div class="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
+    {{#each rows}}
+    <article data-item="{{json item}}" class="card group overflow-hidden border border-base-content/10 bg-base-100 shadow-sm transition hover:shadow-md">
+      <a href="{{detailHref}}" class="block p-5">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex min-w-0 items-center gap-3">
+            <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-box bg-base-200 text-lg font-bold">{{initial}}</span>
+            <div class="min-w-0"><div class="flex flex-wrap items-center gap-2">{{#if code}}<span class="badge badge-ghost tracking-wide">{{code}}</span>{{/if}}{{#if overdue}}<span class="badge badge-error badge-outline">Trễ deadline</span>{{/if}}<span class="text-sm text-base-content/50">{{memberCount}} nhân sự</span></div><h3 class="mt-1 truncate text-base font-semibold">{{name}}</h3></div>
+          </div><span class="text-base-content/50 transition group-hover:translate-x-0.5 group-hover:text-base-content/70">→</span>
+        </div>
+        <div class="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm text-base-content/70"><span>{{#if startDate}}Bắt đầu {{fmtDate startDate}}{{else}}Chưa đặt ngày bắt đầu{{/if}}</span><span class="font-medium {{#if overdue}}text-error{{/if}}">{{#if deadline}}Deadline {{deadlineLabel}}{{else}}Chưa đặt deadline{{/if}}</span></div>
+        <p class="mt-2 line-clamp-2 min-h-10 text-sm leading-5 text-base-content/70">{{#if description}}{{description}}{{else}}Theo dõi tiến độ và nhân sự dự án.{{/if}}</p>
+        <div class="mt-5 grid grid-cols-3 divide-x divide-base-content/10 rounded-box bg-base-200 py-3 text-center">
+          <div><p class="text-lg font-semibold">{{total}}</p><p class="text-sm text-base-content/70">Tổng việc</p></div><div><p class="text-lg font-semibold">{{doing}}</p><p class="text-sm text-base-content/70">Đang làm</p></div><div><p class="text-lg font-semibold">{{done}}</p><p class="text-sm text-base-content/70">Hoàn thành</p></div>
+        </div>
+        <div class="mt-4">{{> progress progress}}</div>
+      </a>
+      <div class="flex items-center justify-between border-t border-base-content/10 px-5 py-3">
+        <a href="{{detailHref}}" class="link link-hover text-sm font-semibold">Mở không gian dự án <span aria-hidden="true">→</span></a>
+        <div class="flex gap-1"><button type="button" data-act="edit" data-form="project" class="btn btn-ghost btn-xs">Sửa</button><button type="button" data-act="delete" data-id="{{idPublic}}" data-resource="projects" data-label="dự án &quot;{{name}}&quot;" data-warn="Toàn bộ backlog (kèm ảnh) của dự án này cũng sẽ bị xóa và không thể khôi phục." class="btn btn-ghost btn-xs text-error">Xóa</button></div>
+      </div>
+    </article>
+    {{else}}
+    {{> empty_state icon="⌂" title="Chưa có dự án phù hợp" text=../empty}}
+    {{/each}}
   </div>
 </section>
-
-
 {{> modal_project}}

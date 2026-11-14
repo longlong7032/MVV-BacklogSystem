@@ -4,16 +4,18 @@ Hệ thống ghi nhận và theo dõi backlog lỗi theo dự án. Viết bằng
 
 | Thư mục | Vai trò | Công nghệ |
 |---|---|---|
-| [`backend/`](backend) | **API JSON** + upload ảnh + MCP + lưu trữ (Postgres / file JSON, Cloudflare R2). Không có giao diện. | Express |
+| [`backend/`](backend) | **API JSON** + upload ảnh + MCP. Dữ liệu trong Postgres (bảng thật, xóa mềm), file trên Cloudflare R2 hoặc Postgres. Không có giao diện. | Express + pg |
 | [`frontend/`](frontend) | **Giao diện**: server render HTML bằng Handlebars, gọi backend qua HTTP; JS phía trình duyệt gọi API để thêm / sửa / xóa. | Express + Handlebars + Tailwind (CDN) |
 | [`chrome-extension/`](chrome-extension) | Extension Chrome báo lỗi nhanh khi test (chụp màn hình + HAR). | Chrome MV3 |
 
 ```
-Trình duyệt ──► frontend (:3000) ──┬─ render trang (hbs), lấy dữ liệu từ backend qua HTTP
-                                   └─ proxy /api, /uploads, /mcp ──► backend (:4000) ──► Postgres / R2 / file
+Trình duyệt ──► frontend (:4000) ──┬─ render trang (hbs), lấy dữ liệu từ backend qua HTTP
+                                   └─ proxy /api, /uploads, /mcp ──► backend (:3000) ──► Postgres (+ R2)
 ```
 
 Frontend **không đọc DB và không import code của backend**; hai bên chỉ giao tiếp qua API (`/api/...`). Kiểu dữ liệu của API nằm ở `backend/src/types.d.ts` (frontend và extension giữ bản sao `src/types.d.ts` — khi đổi API nhớ cập nhật cả hai).
+
+**Thiết kế schema + API chi tiết: [docs/API.md](docs/API.md).** Mọi bảng có `id_private` (khóa nội bộ, không ra API), `id_public` (UUID v7, dùng trên API là `idPublic`), `created_at`, `updated_at`, `deleted_at` (xóa mềm).
 
 ## Chạy local
 
@@ -21,23 +23,29 @@ Frontend **không đọc DB và không import code của backend**; hai bên ch�
 npm run install:all      # cài thư viện cho backend, frontend, extension
 npm run build            # biên dịch cả 3 project
 
-# Terminal 1 — backend (mặc định :4000; cấu hình trong backend/.env)
+# Postgres local (Docker) — lần đầu
+docker compose up -d     # Postgres 17 ở localhost:5433 (xem docker-compose.yml)
+cp backend/.env.example backend/.env   # DATABASE_URL đã trỏ sẵn tới Postgres local
+
+# Terminal 1 — backend (mặc định :3000; cấu hình trong backend/.env)
 npm run dev:backend
-# Terminal 2 — frontend (mặc định :3000; cấu hình trong frontend/.env, BACKEND_URL=http://localhost:4000)
+# Terminal 2 — frontend (mặc định :4000; cấu hình trong frontend/.env, BACKEND_URL=http://localhost:3000)
 cp frontend/.env.example frontend/.env   # lần đầu
 npm run dev:frontend
 ```
 
-Mở http://localhost:3000. Chạy bản build: `npm run start:backend` và `npm run start:frontend`. Kiểm tra kiểu: `npm run typecheck`.
+Mở http://localhost:4000. Chạy bản build: `npm run start:backend` và `npm run start:frontend`. Kiểm tra kiểu: `npm run typecheck`.
 
 - Giao diện là các file `frontend/views/*.hbs` + `views/partials/*.hbs`: sửa rồi tải lại trang là thấy. Sửa `frontend/src/client/*.ts` thì chạy lại `npm --prefix frontend run build:client`.
 - Mỗi project cũng chạy độc lập: `cd backend && npm run dev`, `cd frontend && npm run dev`.
+- Schema tự migrate khi backend khởi động (hoặc chạy tay `npm --prefix backend run db:migrate`). Xóa sạch dữ liệu local: `docker compose down -v`.
+- Tạo admin bằng dòng lệnh: `npm --prefix backend run create-admin -- "Họ tên" email@congty.vn` (in token một lần).
 
 ## Biến môi trường
 
 | Project | File | Biến chính |
 |---|---|---|
-| backend | `backend/.env` (mẫu: `backend/.env.example`) | `PORT`, `DATABASE_URL`, `R2_*`, `ADMIN_EMAIL` / `ADMIN_PASSWORD`, `PUBLIC_URL`, `MCP_READONLY`, `TRUST_PROXY` |
+| backend | `backend/.env` (mẫu: `backend/.env.example`) | `PORT`, `DATABASE_URL` (**bắt buộc**), `R2_*`, `ADMIN_EMAIL` / `ADMIN_PASSWORD`, `PUBLIC_URL`, `MCP_READONLY`, `TRUST_PROXY` |
 | frontend | `frontend/.env` (mẫu: `frontend/.env.example`) | `PORT`, `BACKEND_URL`, `TRUST_PROXY`, `PUBLIC_URL` |
 
 `PUBLIC_URL` của backend nên là địa chỉ công khai của **frontend** (vì ảnh / HAR được phục vụ qua `/uploads/...` của frontend khi MCP dựng link).
@@ -46,7 +54,7 @@ Mở http://localhost:3000. Chạy bản build: `npm run start:backend` và `npm
 
 Deploy thành **2 project Vercel**, root directory lần lượt là `backend` và `frontend` (mỗi project có `vercel.json` + `api/index.js` riêng).
 
-Vercel không cho ghi file, nên khi backend có biến kết nối Postgres nó lưu **toàn bộ dữ liệu và ảnh vào Postgres**. Điền thêm 4 biến `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` thì **ảnh và file HAR lưu trên Cloudflare R2** (Postgres chỉ giữ dữ liệu); file cũ nằm trong Postgres vẫn đọc được. Bucket giữ ở chế độ private — backend tự phục vụ file qua `/uploads/...`. Không có biến này (chạy local) backend dùng `backend/data/db.json` + `backend/uploads/`, nên chạy thử local **không đụng dữ liệu production**.
+Backend bắt buộc có Postgres (`DATABASE_URL`). Điền thêm 4 biến `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` thì **ảnh / HAR / tài liệu lưu trên Cloudflare R2** (bucket private, backend tự phục vụ qua `/uploads/...`); không có thì bytes nằm trong bảng `files` của Postgres. Chạy local dùng Postgres Docker riêng nên **không đụng dữ liệu production**.
 
 1. **Project backend** — Environment Variables:
 
@@ -58,27 +66,25 @@ Vercel không cho ghi file, nên khi backend có biến kết nối Postgres nó
    | `PUBLIC_URL` | Địa chỉ công khai của frontend, vd `https://mvv-backlog.vercel.app` |
 
 2. **Project frontend** — Environment Variables: `BACKEND_URL` (địa chỉ project backend, vd `https://mvv-backlog-api.vercel.app`) và tùy chọn `PUBLIC_URL`.
-3. Push code lên GitHub, Vercel tự build. Bảng `app_state` và `files` được tạo tự động ở lần chạy đầu tiên.
-4. **Chuyển dữ liệu local lên** (một lần, không bắt buộc), chạy trong thư mục `backend`:
+3. Push code lên GitHub, Vercel tự build. Các bảng được tạo tự động (migration) ở request đầu tiên.
+4. **Nâng cấp từ bản cũ (1 dòng JSON trong bảng `app_state`)**: lần chạy đầu, migration tự đổi tên bảng cũ thành `legacy_app_state` / `legacy_files` (không xóa) và ứng dụng bắt đầu với **dữ liệu trống**. Khi chắc chắn không cần dữ liệu cũ: `DROP TABLE IF EXISTS legacy_app_state, legacy_files;`
 
-   ```bash
-   DATABASE_URL="postgresql://..." npm run migrate-to-pg -- --dry-run   # xem sẽ chuyển gì
-   DATABASE_URL="postgresql://..." npm run migrate-to-pg                # chuyển thật (từ chối nếu DB đã có dữ liệu)
-   ```
-
-**Giới hạn trên Vercel:** mỗi request tối đa ~4.5MB, nên ảnh được tự thu nhỏ (cạnh dài tối đa 2560px) ngay trên trình duyệt và tổng ảnh mỗi lần lưu tối đa ~4MB. File HAR từ extension Chrome lớn hơn mức này sẽ bị từ chối. Giới hạn tốc độ (rate limit) đếm riêng theo từng instance. Biến `PG_POOL_MAX` (mặc định 4) chỉnh số kết nối DB mỗi instance.
+**Giới hạn trên Vercel:** mỗi request tối đa ~4.5MB, nên ảnh được tự thu nhỏ (cạnh dài tối đa 2560px) ngay trên trình duyệt và tổng ảnh mỗi lần lưu tối đa ~4MB. File HAR từ extension Chrome lớn hơn mức này sẽ bị từ chối. Giới hạn tốc độ (rate limit) đếm riêng theo từng instance. Biến `PG_POOL_MAX` (mặc định 3 trên Vercel, 10 khi chạy thường) chỉnh số kết nối DB mỗi instance.
 
 ## Cấu trúc
 
 ```
 backend/
-  src/server.ts         API + upload ảnh (multer) + MCP; export app cho Vercel
-  src/types.d.ts        kiểu dữ liệu của API (Project, Team, Feedback, User, ...)
-  src/lib/*.ts          lưu trữ (store), R2, nén ảnh, token, nạp .env, tìm thư mục gốc
+  src/server.ts         khởi tạo app, gắn router, /uploads, MCP; export app cho Vercel
+  src/db/*.ts           kết nối + transaction (pool.ts), migration (migrations.ts, migrate.ts)
+  src/modules/*.ts      API theo module: projects, teams, feedbacks, payments, documents, users, activity
+  src/types.d.ts        kiểu dữ liệu của API (DTO)
+  src/lib/*.ts          file (blobs, upload, R2), UUID v7, nén ảnh, token, tiện ích HTTP
   src/mcp/server.ts     MCP server (các tool cho Claude Code / Cursor)
-  src/scripts/*.ts      create-admin, migrate-to-pg
+  src/scripts/*.ts      create-admin
   api/index.js          điểm vào của Vercel (import dist/server.js)
-  data/db.json, uploads/  dữ liệu local (tự tạo, không commit)
+docker-compose.yml      Postgres cho dev local
+docs/API.md             thiết kế schema + API
 frontend/
   src/server.ts         Express: proxy /api /uploads /mcp sang backend + render trang
   src/backend.ts        hàm gọi backend qua HTTP (chuyển tiếp cookie)
@@ -90,49 +96,14 @@ chrome-extension/       extension Chrome (mã nguồn src/*.ts, build ra *.js c�
 
 ## Chức năng
 
-- **Dự án** (tab "Dự án", `/projects`): thêm / sửa / xóa dự án (tên không trùng, mô tả). Bảng hiển thị tiến độ backlog (% hoàn thành, số chưa làm / đang làm). Xóa dự án sẽ xóa luôn toàn bộ backlog và ảnh của dự án đó (có xác nhận).
-- **Backlog** (tab "Backlog", `/backlog`): thêm / sửa / xóa backlog, lọc theo dự án, theo trạng thái, tìm kiếm.
-- **Trạng thái**: `Chưa làm` · `Đang làm` · `Đã hoàn thành` — đổi trực tiếp ngay trên bảng (dropdown ở cột Trạng thái) hoặc trong form. Khi chuyển sang hoàn thành sẽ lưu ngày hoàn thành.
+- **Tổng quan** (`/dashboard`): khối lượng theo team, tiến độ theo dự án.
+- **Backlog** (`/backlog`): danh sách tóm tắt (lỗi / mong muốn / ảnh), lọc theo trạng thái, dự án, team, loại; chế độ Bảng / Kanban (kéo thả đổi trạng thái); modal chi tiết đổi trạng thái nhanh; xuất Excel.
+- **Dự án** (`/projects`, `/projects/:id`): thông tin, nhân sự, vai trò (dùng làm "Loại" của backlog); các tab Tổng quan ("Cần chú ý"), Backlog, Thanh toán, Tài liệu PTYC, Lịch sử.
+- **Tài liệu PTYC** (`/requirements`): tải tài liệu, nhiều phiên bản, trạng thái Nháp / Chờ duyệt / Đã duyệt.
+- **Thanh toán** (`/payments`): tổng hợp đã thu / còn phải thu của mọi dự án (sửa trong tab Thanh toán của dự án).
+- **Team xử lý** (`/teams`), **Nhân sự** (`/people`: dự án tham gia, mức tải việc), **Người dùng & token** (`/users`), **Kết nối MCP** (`/mcp-guide`).
 
-## Cột dữ liệu backlog
-
-| Cột | Nội dung |
-|---|---|
-| Mã dự án + Tên dự án | Chọn từ danh sách dự án (mã dự án không bắt buộc, không trùng; có nút "+ Dự án mới" ngay trong form) |
-| STT | Tự tăng theo từng dự án |
-| Loại | App customer, Website admin... — chọn gợi ý hoặc nhập loại mới, các loại đã dùng được gợi ý lại |
-| Team xử lý | Chọn từ danh sách team (đổi nhanh ngay trong bảng) |
-| Trạng thái | todo / doing / done |
-| Tên lỗi | Tóm tắt ngắn (tối đa 200 ký tự) |
-| Vị trí lỗi | URL và/hoặc 1 ảnh (+ file HAR nếu có) |
-| Mô tả lỗi | Text + tối đa 10 ảnh |
-| Kết quả mong muốn | Text + tối đa 10 ảnh |
-| Ghi chú | Text, không bắt buộc |
-
-File Excel xuất ra có cột theo đúng thứ tự trên (Mã dự án, Tên dự án, STT, Loại, Team, Trạng thái, Tên lỗi, Vị trí lỗi, Mô tả lỗi, Kết quả mong muốn, Ghi chú...).
-
-Ảnh: chọn file, kéo thả, hoặc dán từ clipboard (Ctrl+V) vào vùng đang trỏ chuột/focus.
-
-Dữ liệu cũ (feedback lưu tên dự án) được tự động chuyển sang dạng mới khi khởi động: tạo dự án tương ứng, gắn `projectId`, trạng thái mặc định `todo`.
-
-## API
-
-Dự án (JSON):
-
-- `GET    /api/projects`
-- `POST   /api/projects` `{ name, description }`
-- `PUT    /api/projects/:id` `{ name, description }`
-- `DELETE /api/projects/:id` (xóa kèm backlog của dự án)
-
-Backlog:
-
-- `GET    /api/feedbacks`
-- `POST   /api/feedbacks` (multipart: project_id, status, location_url, location_image, bug_text, bug_images, expected_text, expected_images, har_file)
-- `PUT    /api/feedbacks/:id` (như POST, thêm remove_location_image=1, remove_bug_images=[urls], remove_expected_images=[urls], remove_har=1)
-- `PATCH  /api/feedbacks/:id/status` `{ status: "todo" | "doing" | "done" }`
-- `DELETE /api/feedbacks/:id`
-
-`har_file`: file HAR (log mạng) tối đa 50MB, lưu ở `har: { url, name, size }` (ảnh vẫn giới hạn 10MB).
+Ảnh: chọn file, kéo thả, hoặc dán từ clipboard (Ctrl+V) vào vùng đang trỏ chuột/focus. Danh sách API: [docs/API.md](docs/API.md).
 
 ## Extension Chrome (báo lỗi nhanh khi test)
 

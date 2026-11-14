@@ -1,0 +1,30 @@
+{{!--
+  Xem chi tiết + thao tác nhanh cho một backlog. Context = backlogModel() (cần form.statuses).
+  Nội dung lấy từ <template data-detail> của dòng / thẻ được chọn; thao tác nhanh gọi API PATCH (xem backlog-list.ts).
+--}}
+<div id="backlogDetailModal" data-modal class="modal modal-bottom sm:modal-middle" role="dialog" aria-modal="true" aria-labelledby="backlogDetailTitle">
+  <div class="modal-box flex max-h-[92dvh] w-full max-w-4xl flex-col overflow-hidden p-0">
+    <div class="flex items-start justify-between gap-3 border-b border-base-content/10 px-5 py-4">
+      <h2 id="backlogDetailTitle" class="text-base font-semibold leading-snug">Chi tiết backlog</h2>
+      <button type="button" data-close class="btn btn-ghost btn-sm btn-square -mr-2 -mt-1" aria-label="Đóng">✕</button>
+    </div>
+
+    <div class="min-h-0 flex-1 overflow-y-auto">
+      <!-- Chỉ đổi trạng thái tại đây (lưu ngay); sửa nội dung / team / người xử lý dùng nút "Sửa" -->
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-base-content/10 bg-base-200/60 px-5 py-4">
+        <span class="text-xs font-medium uppercase tracking-wide text-base-content/60">Trạng thái</span>
+        <div class="join" role="group" aria-label="Đổi trạng thái">
+          {{#each form.statuses}}<button type="button" data-quick-status="{{key}}" class="btn btn-sm join-item whitespace-nowrap" aria-pressed="false">{{label}}</button>{{/each}}
+        </div>
+        <span data-quick-status-text role="status" class="text-xs text-base-content/60"></span>
+      </div>
+
+      <div id="backlogDetailBody" class="px-5 py-5"></div>
+    </div>
+
+    <div class="flex items-center justify-end gap-2 border-t border-base-content/10 bg-base-200 px-5 py-3">
+      <button type="button" data-close class="btn btn-sm">Đóng</button>
+      <button type="button" data-detail-edit class="btn btn-sm">Sửa</button>
+    </div>
+  </div>
+</div>

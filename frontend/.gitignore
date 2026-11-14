@@ -1,5 +1,6 @@
 node_modules
 dist
 .env
+.env.*
 # Sinh ra từ src/client/*.ts (npm run build:client)
 public/js/

@@ -2,7 +2,7 @@
  * Tiện ích dùng chung cho các trang render phía server: định dạng, query string, tiến độ, danh sách <option>
  * và các helper Handlebars (fmtDate, fmtSize, timeAgo, dateTime, json, eq).
  */
-import type { Feedback, FeedbackStatus } from '../types.js';
+import type { DocumentStatus, Feedback, FeedbackStatus } from '../types.js';
 
 /** Một dòng <option> cho dropdown. */
 export interface OptionItem {
@@ -11,12 +11,40 @@ export interface OptionItem {
   selected?: boolean;
 }
 
-/** Nhãn và màu (Tailwind) của từng trạng thái. */
-export const STATUSES: Record<FeedbackStatus, { label: string; badge: string; dot: string }> = {
-  todo: { label: 'Chưa làm', badge: 'border-slate-300 bg-slate-100 text-slate-700', dot: 'bg-slate-400' },
-  doing: { label: 'Đang làm', badge: 'border-amber-300 bg-amber-50 text-amber-800', dot: 'bg-amber-500' },
-  done: { label: 'Đã hoàn thành', badge: 'border-emerald-300 bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
+/**
+ * Nhãn và màu của từng trạng thái — dùng class của DaisyUI (badge / progress) và màu theme
+ * (base-content, warning, success) nên tự đổi theo giao diện sáng/tối.
+ */
+export const STATUSES: Record<FeedbackStatus, { label: string; badge: string; dot: string; progress: string; select: string }> = {
+  todo: { label: 'Chưa làm', badge: 'badge-ghost', dot: 'bg-base-content/40', progress: '', select: '' },
+  doing: { label: 'Đang làm', badge: 'badge-warning badge-outline', dot: 'bg-warning', progress: 'progress-warning', select: 'select-warning' },
+  done: { label: 'Đã hoàn thành', badge: 'badge-success badge-outline', dot: 'bg-success', progress: 'progress-success', select: 'select-success' },
 };
+
+/**
+ * Bảng màu ngữ nghĩa dùng chung cho thẻ thống kê, badge, chấm màu.
+ * View-model chỉ chọn `tone`, không tự ghép class màu → đổi theme / màu chỉ sửa ở đây.
+ */
+export type Tone = 'primary' | 'neutral' | 'info' | 'success' | 'warning' | 'error';
+export const TONES: Record<Tone, { dot: string; badge: string; progress: string }> = {
+  primary: { dot: 'bg-primary', badge: 'badge-primary badge-outline', progress: 'progress-primary' },
+  neutral: { dot: 'bg-base-content/40', badge: 'badge-ghost', progress: '' },
+  info: { dot: 'bg-info', badge: 'badge-info badge-outline', progress: 'progress-info' },
+  success: { dot: 'bg-success', badge: 'badge-success badge-outline', progress: 'progress-success' },
+  warning: { dot: 'bg-warning', badge: 'badge-warning badge-outline', progress: 'progress-warning' },
+  error: { dot: 'bg-error', badge: 'badge-error badge-outline', progress: 'progress-error' },
+};
+/** Nhãn + màu trạng thái tài liệu PTYC. */
+export const DOC_STATUSES: Record<DocumentStatus, { label: string; badge: string }> = {
+  draft: { label: 'Nháp', badge: 'badge-ghost' },
+  review: { label: 'Chờ duyệt', badge: 'badge-warning badge-outline' },
+  approved: { label: 'Đã duyệt', badge: 'badge-success badge-outline' },
+};
+export const DOC_STATUS_KEYS = Object.keys(DOC_STATUSES) as DocumentStatus[];
+
+/** Định dạng số tiền VND, vd 1.000.000. */
+export const money = (n: number): string => new Intl.NumberFormat('vi-VN').format(n || 0);
+
 /** Thứ tự hiển thị của các trạng thái. */
 export const STATUS_KEYS = Object.keys(STATUSES) as FeedbackStatus[];
 
@@ -56,9 +84,8 @@ export const HELPERS: Record<string, (...args: any[]) => unknown> = {
   /** Chuỗi JSON để nhúng vào thuộc tính data-* (Handlebars tự escape khi in ra). */
   json: (value: unknown) => JSON.stringify(value),
   eq: (a: unknown, b: unknown) => a === b,
-  /** Class của liên kết trên sidebar: tab đang mở được tô sáng. */
-  navClass: (tab: unknown, key: unknown) =>
-    tab === key ? 'bg-slate-800 text-white' : 'text-slate-300 hover:bg-slate-800/60 hover:text-white',
+  /** Class của liên kết trên sidebar (DaisyUI `menu`): tab đang mở có class `active`. */
+  navClass: (tab: unknown, key: unknown) => (tab === key ? 'active' : ''),
 };
 
 /** So sánh tên theo locale tiếng Việt (dùng để sắp xếp). */

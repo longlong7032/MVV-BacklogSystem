@@ -1,0 +1,41 @@
+{{!-- Nhân sự đang hoạt động + khối lượng việc. Thêm / sửa người dùng ở trang "Người dùng & token". --}}
+<section class="space-y-4">
+  {{#> page_header title="Nhân sự" subtitle="Ai đang tham gia dự án nào và đang giữ bao nhiêu việc."}}
+    <a href="/users" class="btn btn-sm">Quản lý người dùng</a>
+  {{/page_header}}
+
+  <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="stats border border-base-content/10 bg-base-100 shadow-sm"><div class="stat py-4"><div class="stat-title">Nhân sự hoạt động</div><div class="stat-value text-2xl">{{stats.people}}</div></div></div>
+    <div class="stats border border-base-content/10 bg-base-100 shadow-sm"><div class="stat py-4"><div class="stat-title">Đang tham gia dự án</div><div class="stat-value text-2xl">{{stats.inProjects}}</div></div></div>
+    <div class="stats border border-base-content/10 bg-base-100 shadow-sm"><div class="stat py-4"><div class="stat-title">Việc đang mở đã giao</div><div class="stat-value text-2xl">{{stats.assignedOpen}}</div></div></div>
+    <div class="stats border border-base-content/10 bg-base-100 shadow-sm"><div class="stat py-4"><div class="stat-title">Việc đang mở chưa giao</div><div class="stat-value text-2xl {{#if stats.unassignedOpen}}text-warning{{/if}}">{{stats.unassignedOpen}}</div>{{#if stats.unassignedOpen}}<div class="stat-desc"><a href="/backlog" class="link link-hover">Mở backlog để giao việc</a></div>{{/if}}</div></div>
+  </div>
+
+  <div class="card border border-base-content/10 bg-base-100 shadow-sm">
+    <div class="border-b border-base-content/10 p-4">{{> search_box action="/people" q=q placeholder="Tìm tên, team..."}}</div>
+    <div class="overflow-x-auto">
+      <table class="table w-full md:min-w-[820px] md:table-fixed">
+        <colgroup><col class="md:w-56"><col class="md:w-36"><col><col class="md:w-44"><col class="md:w-32"></colgroup>
+        <thead><tr><th>Nhân sự</th><th>Team</th><th>Dự án tham gia</th><th>Việc</th><th>Mức tải</th></tr></thead>
+        <tbody>
+          {{#each rows}}
+          <tr class="hover align-top">
+            <td>
+              <div class="flex items-center gap-3">
+                <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-base-200 text-sm font-semibold" aria-hidden="true">{{initial}}</span>
+                <span class="min-w-0"><span class="block truncate font-medium">{{name}}</span><span class="block text-xs text-base-content/60">Quyền: {{roleLabel}}</span></span>
+              </div>
+            </td>
+            <td class="text-sm">{{#if teamName}}{{teamName}}{{else}}<span class="text-base-content/50">Chưa thuộc team</span>{{/if}}</td>
+            <td><div class="flex flex-wrap gap-1">{{#each projects}}<a href="{{href}}" class="badge badge-ghost hover:border-base-content/30">{{label}}</a>{{else}}<span class="text-sm text-base-content/50">Chưa tham gia dự án</span>{{/each}}</div></td>
+            <td class="text-sm"><b>{{openCount}}</b> đang mở{{#if doingCount}} <span class="text-base-content/60">({{doingCount}} đang làm)</span>{{/if}}<span class="block text-xs text-base-content/60">{{doneCount}} đã xong</span></td>
+            <td><span class="badge {{load.badge}} whitespace-nowrap">{{load.label}}</span></td>
+          </tr>
+          {{else}}
+          <tr><td colspan="5" class="py-14 text-center text-base-content/60">{{empty}}</td></tr>
+          {{/each}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>

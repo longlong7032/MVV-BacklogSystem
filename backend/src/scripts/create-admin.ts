@@ -1,79 +1,43 @@
 #!/usr/bin/env node
 /**
- * Tạo (hoặc cấp lại token cho) một quản trị viên — chạy trên server, không cần khóa dùng chung.
- *   npm run create-admin -- "Tên" email@congty.vn
- * Nếu email đã tồn tại: nâng lên Admin, kích hoạt lại và cấp token mới (token cũ mất hiệu lực).
- * Token chỉ in ra đúng một lần.
+ * Tạo (hoặc cấp lại token cho) một quản trị viên — chạy trên máy có quyền truy cập DATABASE_URL.
+ *   npm run create-admin -- "Họ tên" email@congty.vn
+ * Email đã tồn tại: nâng lên Admin, kích hoạt lại và cấp token mới (token cũ mất hiệu lực). Token chỉ in ra một lần.
  */
-import fs from 'node:fs';
-import path from 'node:path';
-import crypto from 'node:crypto';
+import '../lib/env.js';
+import { getPool, q1, tx } from '../db/pool.js';
+import { runMigrations } from '../db/migrate.js';
+import { uuidv7 } from '../lib/ids.js';
 import { newToken, hashToken, tokenHint } from '../lib/tokens.js';
-import { ROOT_DIR } from '../lib/paths.js';
-import type { Database, User } from '../types.js';
 
-/** File dữ liệu local mà script đọc/ghi trực tiếp (không đi qua server). */
-const DB_FILE = path.join(ROOT_DIR, 'data', 'db.json');
-
-// Tham số dòng lệnh: <họ tên> <email>
-const [name, emailArg] = process.argv.slice(2);
-const email = String(emailArg || '')
-  .trim()
-  .toLowerCase();
-
-// Kiểm tra đầu vào: cần có tên và email đúng định dạng
-if (!name || !name.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+const [nameArg, emailArg] = process.argv.slice(2);
+const name = String(nameArg || '').trim().slice(0, 120);
+const email = String(emailArg || '').trim().toLowerCase();
+if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
   console.error('Cách dùng: npm run create-admin -- "Họ tên" email@congty.vn');
   process.exit(1);
 }
 
-// Đọc dữ liệu hiện có; chưa có file (lần đầu) thì bắt đầu từ dữ liệu rỗng
-let db: Partial<Database> & { users: User[] } = { users: [] };
 try {
-  db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+  await runMigrations(() => {});
+  const token = newToken();
+  const existed = await tx(async () => {
+    const user = await q1('SELECT id_private FROM users WHERE email = $1 AND deleted_at IS NULL FOR UPDATE', [email]);
+    const fields = [hashToken(token), tokenHint(token)];
+    if (user) {
+      await q1("UPDATE users SET role = 'admin', active = true, token_hash = $2, token_hint = $3, token_created_at = now(), last_used_at = NULL WHERE id_private = $1", [user.id_private, ...fields]);
+    } else {
+      await q1("INSERT INTO users (id_public, name, email, role, token_hash, token_hint, token_created_at) VALUES ($1, $2, $3, 'admin', $4, $5, now())", [uuidv7(), name, email, ...fields]);
+    }
+    await q1('INSERT INTO audit_logs (id_public, actor, action, target) VALUES ($1, $2, $3, $4)', [uuidv7(), 'dòng lệnh', user ? 'cấp lại token admin' : 'tạo admin', name]);
+    return Boolean(user);
+  });
+  console.log(`${existed ? 'Đã nâng lên Admin và cấp lại token cho' : 'Đã tạo quản trị viên'}: ${name} <${email}>`);
+  console.log('\nToken (chỉ hiển thị một lần — lưu ngay, dán vào trang "Người dùng"):\n');
+  console.log('  ' + token + '\n');
 } catch (e) {
-  if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
-    console.error('Không đọc được data/db.json:', (e as Error).message);
-    process.exit(1);
-  }
+  console.error('Lỗi:', (e as Error).message);
+  process.exitCode = 1;
+} finally {
+  await getPool().end();
 }
-db.users = Array.isArray(db.users) ? db.users : [];
-
-const now = new Date().toISOString();
-const token = newToken();
-// Email đã có -> nâng quyền + cấp lại token; chưa có -> tạo người dùng mới
-let user: User | undefined = db.users.find((u) => u.email === email);
-const existed = Boolean(user);
-if (!user) {
-  user = {
-    id: crypto.randomUUID(),
-    name: name.trim().slice(0, 120),
-    email,
-    role: 'admin',
-    active: true,
-    teamId: '',
-    tokenHash: '',
-    tokenHint: '',
-    createdAt: now,
-    updatedAt: now,
-  };
-  db.users.push(user);
-}
-Object.assign(user, {
-  role: 'admin',
-  active: true,
-  tokenHash: hashToken(token),
-  tokenHint: tokenHint(token),
-  tokenCreatedAt: now,
-  lastUsedAt: null,
-  updatedAt: now,
-});
-
-// Ghi an toàn: ghi file tạm rồi đổi tên
-fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
-fs.writeFileSync(DB_FILE + '.tmp', JSON.stringify(db, null, 2));
-fs.renameSync(DB_FILE + '.tmp', DB_FILE);
-
-console.log(`${existed ? 'Đã nâng lên Admin và cấp lại token cho' : 'Đã tạo quản trị viên'}: ${user.name} <${user.email}>`);
-console.log('\nToken (chỉ hiển thị một lần — lưu ngay, dán vào trang "Người dùng"):\n');
-console.log('  ' + token + '\n');

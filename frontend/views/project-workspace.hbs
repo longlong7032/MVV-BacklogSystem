@@ -1,0 +1,219 @@
+{{#if missing}}
+{{> empty_state icon="⌂" title="Không tìm thấy dự án"}}
+<div class="mt-4 text-center"><a class="btn btn-sm" href="/projects">← Quay lại danh sách dự án</a></div>
+{{else}}
+<section data-item="{{json project}}" class="space-y-5">
+  <!-- Đầu trang dự án: tên, mốc thời gian, nhân sự + sửa nhanh -->
+  <header class="flex flex-wrap items-start justify-between gap-4">
+    <div class="min-w-0">
+      <div class="flex flex-wrap items-center gap-2">
+        {{#if project.code}}<span class="badge badge-ghost font-medium tracking-wide">{{project.code}}</span>{{/if}}
+        {{#if hasOverdue}}<span class="badge badge-error badge-outline">Trễ deadline</span>{{/if}}
+      </div>
+      <h1 class="mt-1 text-2xl font-semibold tracking-tight">{{project.name}}</h1>
+      {{#if project.description}}<p class="mt-1 max-w-3xl text-sm text-base-content/70">{{project.description}}</p>{{/if}}
+      <dl class="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+        <div class="flex gap-1.5"><dt class="text-base-content/60">Bắt đầu</dt><dd class="font-medium">{{startDateLabel}}</dd></div>
+        <div class="flex gap-1.5"><dt class="text-base-content/60">Deadline</dt><dd class="font-medium {{deadlineTone}}">{{deadlineLabel}}{{#if hasDeadline}} · {{deadlineState}}{{/if}}</dd></div>
+        <div class="flex gap-1.5"><dt class="text-base-content/60">Nhân sự</dt><dd class="font-medium">{{participantCount}} người</dd></div>
+        <div class="flex gap-1.5"><dt class="text-base-content/60">Tiến độ</dt><dd class="font-medium">{{doneCount}}/{{taskCount}} việc xong</dd></div>
+      </dl>
+    </div>
+    <button type="button" data-act="edit" data-form="project" class="btn btn-sm">Sửa dự án</button>
+  </header>
+
+  <nav role="tablist" class="tabs tabs-bordered justify-start overflow-x-auto border-b border-base-content/10" aria-label="Nội dung dự án">
+    {{#each tabs}}<a href="{{href}}" role="tab" aria-selected="{{active}}" class="tab -mb-px h-11 gap-2 whitespace-nowrap {{#if active}}tab-active font-semibold{{/if}}">{{label}}{{#if count}}<span class="badge badge-sm {{#if active}}badge-primary{{else}}badge-ghost{{/if}}">{{count}}</span>{{/if}}</a>{{/each}}
+  </nav>
+
+  {{#if (eq section "overview")}}
+  <div class="grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+    <!-- Cần chú ý: việc nên xử lý ngay, mỗi việc một nút -->
+    <section class="card border border-base-content/10 bg-base-100 shadow-sm">
+      <div class="flex items-center justify-between gap-3 border-b border-base-content/10 px-5 py-4">
+        <h2 class="font-semibold">Cần chú ý</h2>
+        {{#if attention.length}}<span class="badge badge-warning badge-outline">{{attention.length}} việc</span>{{/if}}
+      </div>
+      {{#if attention.length}}
+      <ul class="divide-y divide-base-content/10">
+        {{#each attention}}
+        <li class="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+          <span class="flex min-w-0 items-center gap-3 text-sm">
+            <span class="h-2.5 w-2.5 shrink-0 rounded-full {{#if (eq tone "error")}}bg-error{{else if (eq tone "warning")}}bg-warning{{else}}bg-info{{/if}}" aria-hidden="true"></span>
+            {{text}}
+          </span>
+          {{#if editProject}}<button type="button" data-act="edit" data-form="project" class="btn btn-ghost btn-xs">{{action}} →</button>{{else}}<a href="{{href}}" class="btn btn-ghost btn-xs">{{action}} →</a>{{/if}}
+        </li>
+        {{/each}}
+      </ul>
+      {{else}}
+      <div class="flex items-center gap-3 px-5 py-6 text-sm"><span class="flex h-8 w-8 items-center justify-center rounded-full bg-success/15 text-success" aria-hidden="true">✓</span>Dự án đang ổn — không có việc nào cần xử lý gấp.</div>
+      {{/if}}
+    </section>
+
+    <!-- Backlog: tình trạng xử lý -->
+    <section class="card border border-base-content/10 bg-base-100 shadow-sm">
+      <div class="flex items-center justify-between gap-3 border-b border-base-content/10 px-5 py-4">
+        <h2 class="font-semibold">Backlog</h2>
+        <a href="{{backlogSectionHref}}" class="btn btn-ghost btn-xs">Mở backlog →</a>
+      </div>
+      <div class="px-5 py-4">
+        <div class="grid grid-cols-3 gap-2 text-center">
+          <a href="{{backlogSectionHref}}&status=todo" class="rounded-box bg-base-200 p-3 transition hover:bg-base-300"><p class="text-2xl font-semibold">{{todoCount}}</p><p class="text-xs text-base-content/70">Chưa làm</p></a>
+          <a href="{{backlogSectionHref}}&status=doing" class="rounded-box bg-base-200 p-3 transition hover:bg-base-300"><p class="text-2xl font-semibold text-warning">{{doingCount}}</p><p class="text-xs text-base-content/70">Đang làm</p></a>
+          <a href="{{backlogSectionHref}}&status=done" class="rounded-box bg-base-200 p-3 transition hover:bg-base-300"><p class="text-2xl font-semibold text-success">{{doneCount}}</p><p class="text-xs text-base-content/70">Hoàn thành</p></a>
+        </div>
+        {{#if taskCount}}
+        <div class="mt-4 flex items-center gap-3 text-sm"><progress class="progress progress-success flex-1" value="{{backlogPct}}" max="100" aria-label="{{backlogPct}}% hoàn thành"></progress><span class="w-10 text-right font-medium">{{backlogPct}}%</span></div>
+        {{else}}
+        <p class="mt-4 text-sm text-base-content/60">Chưa có backlog nào trong dự án.</p>
+        {{/if}}
+      </div>
+    </section>
+
+    <!-- Thanh toán -->
+    <section class="card border border-base-content/10 bg-base-100 shadow-sm">
+      <div class="flex items-center justify-between gap-3 border-b border-base-content/10 px-5 py-4">
+        <h2 class="font-semibold">Thanh toán</h2>
+        <a href="{{paymentsSectionHref}}" class="btn btn-ghost btn-xs">Chi tiết →</a>
+      </div>
+      <div class="px-5 py-4">
+        <div class="flex items-end justify-between gap-3">
+          <div><p class="text-2xl font-semibold tabular-nums">{{paymentTotalLabel}} ₫</p><p class="text-sm text-base-content/70">đã thu{{#if hasContractValue}} / {{projectValueLabel}} ₫{{/if}}</p></div>
+          {{#if hasContractValue}}<p class="text-lg font-semibold">{{collectionPct}}%</p>{{/if}}
+        </div>
+        {{#if hasContractValue}}<progress class="progress progress-primary mt-3 w-full" value="{{collectionPct}}" max="100" aria-label="{{collectionPct}}% đã thu"></progress>
+        <p class="mt-2 text-sm text-base-content/70">Còn phải thu <b class="text-base-content">{{paymentRemainingLabel}} ₫</b></p>{{/if}}
+        {{#if recentPayments.length}}
+        <ul class="mt-3 divide-y divide-base-content/10 text-sm">
+          {{#each recentPayments}}<li class="flex items-center justify-between gap-3 py-2"><span class="min-w-0 truncate">{{name}} <span class="text-base-content/50">· {{dateLabel}}</span></span><span class="flex shrink-0 items-center gap-2"><span class="tabular-nums font-medium">{{amountLabel}} ₫</span><span class="badge badge-sm {{#if paid}}badge-success badge-outline{{else}}badge-warning badge-outline{{/if}}">{{#if paid}}Đã thu{{else}}Chưa thu{{/if}}</span></span></li>{{/each}}
+        </ul>
+        {{else}}
+        <p class="mt-3 text-sm text-base-content/60">Chưa ghi nhận đợt thanh toán nào.</p>
+        {{/if}}
+      </div>
+    </section>
+
+    <!-- Nhân sự -->
+    <section class="card border border-base-content/10 bg-base-100 shadow-sm">
+      <div class="flex items-center justify-between gap-3 border-b border-base-content/10 px-5 py-4">
+        <h2 class="font-semibold">Nhân sự <span class="font-normal text-base-content/60">· {{participantCount}}</span></h2>
+        <button type="button" data-act="edit" data-form="project" class="btn btn-ghost btn-xs">Chọn nhân sự</button>
+      </div>
+      {{#if projectMembers.length}}
+      <ul class="divide-y divide-base-content/10">
+        {{#each projectMembers}}
+        <li class="flex items-center justify-between gap-3 px-5 py-2.5">
+          <span class="flex min-w-0 items-center gap-3">
+            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-base-200 text-xs font-semibold" aria-hidden="true">{{initial}}</span>
+            <span class="min-w-0"><span class="block truncate text-sm font-medium">{{name}}</span><span class="block truncate text-xs text-base-content/60">{{teamName}}</span></span>
+          </span>
+          <span class="shrink-0 text-xs text-base-content/70"><b class="text-base-content">{{workCount}}</b> đang mở · {{doneCount}} xong</span>
+        </li>
+        {{/each}}
+      </ul>
+      {{else}}
+      <p class="px-5 py-6 text-sm text-base-content/60">Chưa có nhân sự nào. Bấm “Chọn nhân sự” để thêm.</p>
+      {{/if}}
+    </section>
+  </div>
+
+  {{else if (eq section "backlog")}}
+  <div class="space-y-3">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <p class="text-sm text-base-content/70">Bấm vào tên backlog để xem đầy đủ, đổi trạng thái hoặc giao việc.</p>
+      <div class="flex flex-wrap gap-2">
+        <a href="{{backlog.exportHref}}" class="btn btn-ghost btn-sm">Tải Excel</a>
+        <button type="button" data-open-form="feedback" class="btn btn-primary btn-sm"><span aria-hidden="true">+</span> Thêm backlog</button>
+      </div>
+    </div>
+    {{> backlog_list backlog}}
+  </div>
+
+  {{else if (eq section "payments")}}
+  <div class="space-y-4">
+    <div class="grid gap-3 sm:grid-cols-3">
+      <div class="stats border border-base-content/10 bg-base-100 shadow-sm"><div class="stat py-4"><div class="stat-title">Tổng giá trị dự án</div><div class="stat-value text-xl tabular-nums">{{projectValueLabel}} ₫</div>{{#unless hasContractValue}}<div class="stat-desc"><button type="button" data-act="edit" data-form="project" class="link link-primary">Nhập giá trị dự án</button></div>{{/unless}}</div></div>
+      <div class="stats border border-base-content/10 bg-base-100 shadow-sm"><div class="stat py-4"><div class="stat-title">Đã thu</div><div class="stat-value text-xl tabular-nums text-success">{{paymentTotalLabel}} ₫</div>{{#if hasContractValue}}<div class="stat-desc">{{collectionPct}}% giá trị dự án</div>{{/if}}</div></div>
+      <div class="stats border border-base-content/10 bg-base-100 shadow-sm"><div class="stat py-4"><div class="stat-title">Còn phải thu</div><div class="stat-value text-xl tabular-nums">{{paymentRemainingLabel}} ₫</div><div class="stat-desc">{{unpaidPaymentCount}} đợt chưa xác nhận</div></div></div>
+    </div>
+
+    <div class="card border border-base-content/10 bg-base-100 shadow-sm">
+      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-base-content/10 px-5 py-4">
+        <h2 class="font-semibold">Đợt thanh toán <span class="font-normal text-base-content/60">· {{paymentCount}}</span></h2>
+        <div class="flex flex-wrap items-center gap-2">
+          {{#if hasCompanyPaidPayments}}{{#if hasProjectInvoiceTask}}<span class="text-sm text-base-content/70">✓ Đã tạo việc hóa đơn tổng</span>{{else}}<button type="button" data-invoice-project="/api/projects/{{project.idPublic}}/invoice-task" class="btn btn-ghost btn-sm">Tạo việc hóa đơn tổng</button>{{/if}}{{/if}}
+          <button type="button" data-payment-add class="btn btn-primary btn-sm"><span aria-hidden="true">+</span> Thêm đợt</button>
+        </div>
+      </div>
+      {{#if payments.length}}
+      <div class="overflow-x-auto">
+        <table class="table w-full min-w-[820px] table-fixed">
+          <colgroup><col class="w-12"><col><col class="w-36"><col class="w-32"><col class="w-40"><col class="w-20"><col class="w-36"></colgroup>
+          <thead><tr><th>STT</th><th>Đợt</th><th class="text-right">Số tiền</th><th>Ngày</th><th>Trạng thái</th><th>Biên nhận</th><th class="text-right"><span class="sr-only">Thao tác</span></th></tr></thead>
+          <tbody>
+            {{#each payments}}
+            <tr data-payment-item="{{json this}}" class="hover align-top">
+              <td class="tabular-nums text-base-content/60">{{stt}}</td>
+              <td>
+                <p class="truncate font-medium" title="{{name}}">{{name}}</p>
+                {{#if note}}<p class="line-clamp-2 text-xs text-base-content/60" title="{{note}}">{{note}}</p>{{/if}}
+                {{#if companyAccount}}<p class="mt-0.5 text-xs text-base-content/60">Tài khoản công ty{{#if paid}} · {{#if invoiceFeedbackId}}✓ đã có việc hóa đơn{{else}}<button type="button" data-payment-invoice class="link link-primary">Tạo việc hóa đơn</button>{{/if}}{{/if}}</p>{{/if}}
+              </td>
+              <td class="text-right font-semibold tabular-nums">{{amountLabel}} ₫</td>
+              <td class="whitespace-nowrap text-base-content/70">{{dateLabel}}</td>
+              <td><button type="button" data-payment-toggle aria-pressed="{{paid}}" title="Bấm để đổi trạng thái" class="btn btn-xs whitespace-nowrap {{#if paid}}btn-success btn-outline{{else}}btn-warning btn-outline{{/if}}">{{#if paid}}✓ Đã thu{{else}}Chưa thu{{/if}}</button></td>
+              <td>{{#if image}}<img src="{{image}}" data-zoom="{{image}}" alt="Biên nhận {{name}}" class="h-10 w-14 cursor-zoom-in rounded-btn border border-base-content/10 object-cover">{{else}}<span class="text-xs text-base-content/50">Chưa có</span>{{/if}}</td>
+              <td><div class="flex justify-end gap-1 whitespace-nowrap"><button type="button" data-payment-edit class="btn btn-ghost btn-xs">Sửa</button><button type="button" data-payment-delete class="btn btn-ghost btn-xs text-error">Xóa</button></div></td>
+            </tr>
+            {{/each}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <div class="p-5">{{> empty_state icon="₫" title="Chưa có đợt thanh toán" text="Bấm “Thêm đợt” để ghi nhận đợt thanh toán đầu tiên."}}</div>
+      {{/if}}
+    </div>
+  </div>
+
+  {{else if (eq section "activity")}}
+  <div class="card border border-base-content/10 bg-base-100 shadow-sm">
+    <div class="border-b border-base-content/10 px-5 py-4"><h2 class="font-semibold">Lịch sử thay đổi</h2><p class="text-sm text-base-content/60">30 thao tác gần nhất trên backlog, tài liệu và thanh toán của dự án.</p></div>
+    {{#if activity.length}}
+    <ol class="divide-y divide-base-content/10">
+      {{#each activity}}
+      <li class="flex gap-3 px-5 py-3">
+        <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-base-content/30" aria-hidden="true"></span>
+        <div class="min-w-0 flex-1 text-sm">
+          <p><b>{{actionLabel}}</b> <span class="badge badge-ghost badge-sm">{{typeLabel}}</span> {{entityTitle}}</p>
+          {{#if details.length}}<p class="mt-0.5 text-base-content/70">{{#each details}}{{this}}{{#unless @last}} · {{/unless}}{{/each}}</p>{{/if}}
+          <p class="mt-0.5 text-xs text-base-content/50">{{actor}} · {{dateLabel}}</p>
+        </div>
+      </li>
+      {{/each}}
+    </ol>
+    {{else}}
+    <div class="p-5">{{> empty_state icon="↺" title="Chưa có lịch sử thay đổi" text="Các thao tác tạo, sửa, giao việc, đổi trạng thái và xóa sẽ được ghi tại đây."}}</div>
+    {{/if}}
+  </div>
+
+  {{else}}
+  <div class="space-y-3">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <p class="text-sm text-base-content/70">Tài liệu phân tích yêu cầu của dự án; mỗi lần tải file mới là một phiên bản.</p>
+      <button type="button" data-open-form="document" class="btn btn-primary btn-sm"><span aria-hidden="true">+</span> Tải tài liệu</button>
+    </div>
+    {{> documents_list documents}}
+  </div>
+  {{/if}}
+</section>
+{{#if (eq section "backlog")}}{{> modal_backlog backlog}}{{/if}}
+{{> modal_project}}
+<div id="paymentModal" data-modal class="modal" role="dialog" aria-modal="true">
+  <form id="paymentForm" class="modal-box w-full max-w-xl p-0" enctype="multipart/form-data" novalidate>
+    <div class="flex items-center justify-between border-b border-base-content/10 px-5 py-4"><div><p class="text-sm font-semibold uppercase tracking-wide">Dự án {{project.code}}</p><h2 data-payment-title class="mt-1 text-lg font-semibold">Thêm đợt thanh toán</h2></div><button type="button" data-payment-close class="btn btn-ghost btn-sm btn-square" aria-label="Đóng">✕</button></div>
+    <div class="grid gap-4 px-5 py-5 sm:grid-cols-2"><input type="hidden" name="project_id" value="{{project.idPublic}}"><div class="sm:col-span-2"><label class="mb-1 block text-sm font-medium">Tên đợt thanh toán</label><input name="name" maxlength="160" required class="input input-bordered w-full" placeholder="Ví dụ: Tạm ứng đợt 1"></div><div><label class="mb-1 block text-sm font-medium">Số tiền (₫)</label><input name="amount" type="number" min="0" step="1" required class="input input-bordered w-full" placeholder="0"></div><div><label class="mb-1 block text-sm font-medium">Ngày thanh toán</label><input name="paid_at" type="date" class="input input-bordered w-full"></div><div class="space-y-2 sm:col-span-2"><label class="flex items-center gap-2 rounded-box border border-base-content/10 p-3 text-sm"><input name="paid" type="checkbox" value="1" class="checkbox checkbox-sm"> Đã thanh toán <span class="text-sm text-base-content/50">(bắt buộc có ngày và ảnh biên nhận)</span></label><label class="flex items-center gap-2 rounded-box border border-base-content/10 p-3 text-sm"><input name="company_account" type="checkbox" value="1" class="checkbox checkbox-sm"> Thanh toán qua tài khoản công ty</label></div><div class="sm:col-span-2"><label class="mb-1 block text-sm font-medium">Ghi chú</label><textarea name="note" rows="3" maxlength="2000" class="textarea textarea-bordered w-full" placeholder="Thông tin bổ sung..."></textarea></div><div class="sm:col-span-2"><label class="mb-1 block text-sm font-medium">Hình ảnh biên nhận</label><input name="payment_image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" class="file-input file-input-bordered file-input-sm w-full"><div data-current-image class="mt-2 hidden items-center gap-3"><img data-current-image-preview alt="Ảnh hiện tại" class="h-14 w-20 rounded-box border border-base-content/10 object-cover"><label class="flex items-center gap-2 text-sm text-base-content/70"><input type="checkbox" name="remove_image" value="1" class="checkbox checkbox-sm"> Xóa ảnh hiện tại</label></div></div><p data-payment-error role="alert" class="alert alert-error hidden py-2 text-sm sm:col-span-2"></p></div>
+    <div class="flex justify-end gap-2 border-t border-base-content/10 bg-base-200 px-5 py-3"><button type="button" data-payment-close class="btn btn-sm">Hủy</button><button type="submit" data-payment-submit class="btn btn-primary btn-sm">Lưu đợt</button></div>
+  </form>
+</div>
+{{/if}}

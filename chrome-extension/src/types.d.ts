@@ -1,6 +1,13 @@
 /**
- * Các kiểu dữ liệu dùng chung giữa server (server.ts, lib/, mcp/), giao diện (client/) và extension.
- * File chỉ chứa kiểu (không có mã chạy) nên được import bằng `import type` và không sinh ra file .js.
+ * Kiểu dữ liệu của API (DTO) dùng chung giữa backend, frontend và extension (frontend / extension giữ bản sao).
+ * File chỉ chứa kiểu nên được import bằng `import type` và không sinh ra file .js.
+ *
+ * QUY ƯỚC: mọi bản ghi có `idPublic` (UUID v7) + `createdAt` + `updatedAt` (ISO-8601).
+ *  - `idPrivate` (khóa nội bộ trong DB) KHÔNG BAO GIỜ xuất hiện trong API.
+ *  - Bản ghi đã xóa mềm (`deletedAt`) không được trả về, nên không có trường `deletedAt` trong DTO.
+ *  - Tham chiếu tới bản ghi khác (`projectId`, `teamId`, `assigneeId`, ...) chứa `idPublic` của bản ghi đó;
+ *    chuỗi rỗng '' = không có.
+ *  - Ngày (không có giờ) dạng 'YYYY-MM-DD' hoặc '' nếu chưa đặt.
  */
 
 /** Trạng thái xử lý của một backlog: chưa làm / đang làm / đã hoàn thành. */
@@ -9,26 +16,60 @@ export type FeedbackStatus = 'todo' | 'doing' | 'done';
 /** Quyền của người dùng: chỉ đọc, đọc + ghi, hoặc quản trị (ghi + quản lý người dùng). */
 export type Role = 'read' | 'write' | 'admin';
 
-/** Dự án — nhóm các backlog. */
-export interface Project {
-  id: string;
-  /** Mã dự án viết hoa, có thể rỗng; không trùng giữa các dự án. */
-  code: string;
-  name: string;
-  description: string;
+/** Trạng thái tài liệu PTYC: nháp / chờ duyệt / đã duyệt. */
+export type DocumentStatus = 'draft' | 'review' | 'approved';
+
+/** Trường chung của mọi bản ghi trả ra API. */
+export interface Entity {
+  idPublic: string;
   createdAt: string;
   updatedAt: string;
 }
 
+/** Một vai trò trong dự án: tên + mô tả quyền hạn / trách nhiệm (dùng làm "Loại" của backlog). */
+export interface ProjectRole {
+  idPublic?: string;
+  name: string;
+  description: string;
+}
+
+/** Dự án — nhóm các backlog, đợt thanh toán, tài liệu. */
+export interface Project extends Entity {
+  /** Mã dự án viết hoa, có thể rỗng; không trùng giữa các dự án. */
+  code: string;
+  name: string;
+  description: string;
+  totalValue: number;
+  startDate: string;
+  deadline: string;
+  /** idPublic của người dùng tham gia dự án. */
+  memberIds: string[];
+  roles: ProjectRole[];
+  /** idPublic của backlog "xuất hóa đơn tổng" (nếu đã tạo). */
+  invoiceFeedbackId: string;
+}
+
+/** Một đợt thanh toán của dự án. */
+export interface PaymentRound extends Entity {
+  projectId: string;
+  stt: number;
+  name: string;
+  amount: number;
+  note: string;
+  paidAt: string;
+  /** Ảnh biên nhận `/uploads/...` hoặc ''. */
+  image: string;
+  paid: boolean;
+  companyAccount: boolean;
+  invoiceFeedbackId: string;
+}
+
 /** Team xử lý backlog. */
-export interface Team {
-  id: string;
+export interface Team extends Entity {
   name: string;
   /** Tên trưởng nhóm (không bắt buộc). */
   lead: string;
   description: string;
-  createdAt: string;
-  updatedAt: string;
 }
 
 /** Thông tin file HAR (network log) đính kèm một backlog. */
@@ -49,13 +90,14 @@ export interface FeedbackPart {
 }
 
 /** Một backlog (feedback) lỗi. */
-export interface Feedback {
-  id: string;
+export interface Feedback extends Entity {
   projectId: string;
-  /** Id team đang xử lý; chuỗi rỗng = chưa phân công. */
+  /** Team đang xử lý; '' = chưa phân công. */
   teamId: string;
+  /** Người xử lý; '' = chưa giao. */
+  assigneeId: string;
   title: string;
-  /** Loại, ví dụ "App customer", "Website admin". */
+  /** Loại — một vai trò của dự án, ví dụ "App customer", "Website admin". */
   type: string;
   note: string;
   /** Số thứ tự tự tăng trong từng dự án. */
@@ -68,35 +110,20 @@ export interface Feedback {
   har: HarInfo | null;
   /** Thời điểm chuyển sang "done"; null nếu chưa xong. */
   completedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
   /** Tên người cập nhật gần nhất qua MCP (nếu có). */
-  updatedBy?: string;
+  updatedBy: string;
 }
 
-/** Người dùng đầy đủ như lưu trong DB (có băm token/mật khẩu — KHÔNG bao giờ gửi ra ngoài). */
-export interface User {
-  id: string;
+/** Nhân sự tối thiểu dùng để phân công (không có email / thông tin xác thực). */
+export interface ProjectMember {
+  idPublic: string;
   name: string;
-  email: string;
-  role: Role;
   teamId: string;
-  active: boolean;
-  /** SHA-256 của token cá nhân; chuỗi rỗng nếu chưa có token. */
-  tokenHash: string;
-  /** Gợi ý hiển thị của token (vd "fbk_AbCd…wXyZ"). */
-  tokenHint: string;
-  tokenCreatedAt?: string | null;
-  lastUsedAt?: string | null;
-  /** Mật khẩu băm dạng `scrypt$<salt>$<hash>` (chỉ admin đăng nhập bằng mật khẩu). */
-  passwordHash?: string;
-  createdAt: string;
-  updatedAt: string;
+  role: Role;
 }
 
-/** Người dùng khi trả cho giao diện: bỏ các giá trị băm, chỉ giữ cờ hasToken/hasPassword. */
-export interface PublicUser {
-  id: string;
+/** Người dùng trả cho trang quản trị: không có giá trị băm, chỉ giữ cờ hasToken / hasPassword. */
+export interface PublicUser extends Entity {
   name: string;
   email: string;
   role: Role;
@@ -107,34 +134,53 @@ export interface PublicUser {
   tokenHint: string;
   tokenCreatedAt: string | null;
   lastUsedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
 }
 
 /** Một dòng nhật ký hoạt động quản trị. */
-export interface AuditEntry {
-  at: string;
+export interface AuditEntry extends Entity {
   actor: string;
   action: string;
   target: string;
 }
 
-/** Phiên đăng nhập quản trị bằng email + mật khẩu. */
-export interface Session {
-  userId: string;
-  /** Thời điểm hết hạn (ms từ epoch). */
-  exp: number;
+/** Nhật ký thay đổi theo dự án (backlog, thanh toán, tài liệu PTYC). */
+export interface ActivityEntry extends Entity {
+  projectId: string;
+  entityType: 'backlog' | 'ptyc' | 'payment' | 'project';
+  /** idPublic của bản ghi bị thay đổi. */
+  entityId: string;
+  entityTitle: string;
+  action: 'created' | 'updated' | 'status' | 'assigned' | 'deleted';
+  actor: string;
+  details: string[];
 }
 
-/** Toàn bộ dữ liệu ứng dụng (một "tài liệu" JSON). */
-export interface Database {
-  projects: Project[];
-  teams: Team[];
-  users: User[];
-  feedbacks: Feedback[];
-  audit: AuditEntry[];
-  /** Khóa = băm của token phiên. */
-  sessions: Record<string, Session>;
+/** Một file tải lên (dùng trong tài liệu PTYC). */
+export interface FileInfo {
+  url: string;
+  name: string;
+  size: number;
+  mime: string;
+}
+
+/** Một phiên bản của tài liệu PTYC. */
+export interface DocumentVersion extends Entity {
+  version: string;
+  note: string;
+  uploadedBy: string;
+  file: FileInfo;
+}
+
+/** Tài liệu PTYC (phân tích yêu cầu) của dự án. */
+export interface ProjectDocument extends Entity {
+  projectId: string;
+  title: string;
+  /** Loại tài liệu, vd "Đặc tả nghiệp vụ", "Biên bản". */
+  docType: string;
+  status: DocumentStatus;
+  note: string;
+  /** Mới nhất trước. */
+  versions: DocumentVersion[];
 }
 
 /** Kết quả của GET /api/mcp-info. */

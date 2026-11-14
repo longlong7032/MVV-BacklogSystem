@@ -41,6 +41,49 @@ const redirectLegacyHash = (): void => {
 /** Gắn mọi hành vi chung. */
 export function initUi(): void {
   redirectLegacyHash();
+  const clock = document.querySelector<HTMLTimeElement>('#digitalClock');
+  const date = document.querySelector<HTMLElement>('#digitalDate');
+  const updateClock = (): void => {
+    if (!clock) return;
+    const now = new Date();
+    const timeZone = 'Asia/Ho_Chi_Minh';
+    clock.textContent = new Intl.DateTimeFormat('vi-VN', {
+      timeZone, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    }).format(now);
+    clock.dateTime = now.toISOString();
+    if (date) {
+      const dayName = new Intl.DateTimeFormat('vi-VN', { timeZone, weekday: 'long' }).format(now);
+      const weekday = ({ 'Thứ Hai': 'Thứ 2', 'Thứ Ba': 'Thứ 3', 'Thứ Tư': 'Thứ 4', 'Thứ Năm': 'Thứ 5', 'Thứ Sáu': 'Thứ 6', 'Thứ Bảy': 'Thứ 7', 'Chủ Nhật': 'Chủ nhật' } as Record<string, string>)[dayName] || dayName;
+      const dateLabel = new Intl.DateTimeFormat('vi-VN', { timeZone, day: '2-digit', month: '2-digit', year: 'numeric' }).format(now);
+      date.textContent = `${weekday}, ${dateLabel}`;
+    }
+  };
+  updateClock();
+  window.setInterval(updateClock, 1000);
+
+  const themeButton = document.querySelector<HTMLButtonElement>('#themeToggle');
+  const themeIcon = themeButton?.querySelector<HTMLElement>('[data-theme-icon]');
+  const themeLabel = themeButton?.querySelector<HTMLElement>('[data-theme-label]');
+  // Tên theme sáng/tối khai báo một chỗ trong layout.hbs (data-theme-light / data-theme-dark trên <html>)
+  const root = document.documentElement;
+  const themeName = (dark: boolean): string => (dark ? root.dataset.themeDark : root.dataset.themeLight) || (dark ? 'dark' : 'light');
+  const isDark = (): boolean => root.dataset.theme === themeName(true);
+  const setTheme = (dark: boolean): void => {
+    root.dataset.theme = themeName(dark);
+    themeButton?.setAttribute('aria-pressed', String(dark));
+    if (themeIcon) themeIcon.textContent = dark ? '☀️' : '🌙';
+    if (themeLabel) themeLabel.textContent = dark ? 'Giao diện sáng' : 'Giao diện tối';
+  };
+  setTheme(isDark());
+  themeButton?.addEventListener('click', () => {
+    const dark = !isDark();
+    try {
+      localStorage.setItem('feedback-theme', dark ? 'dark' : 'light');
+    } catch {
+      // trình duyệt chặn storage: vẫn đổi theme cho phiên hiện tại
+    }
+    setTheme(dark);
+  });
 
   // Sidebar (di động)
   maybe('#btnMenu')?.addEventListener('click', () => {
@@ -95,7 +138,7 @@ export function initUi(): void {
   // Esc: đóng ảnh phóng to, rồi tới modal trên cùng (trừ modal bắt buộc như hộp token)
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (isOpen($('#lightbox'))) return closeLightbox();
+    if (!$('#lightbox').classList.contains('hidden')) return closeLightbox();
     const open = $$('[data-modal]').filter(isOpen);
     if (open.some((m) => m.hasAttribute('data-modal-sticky'))) return; // token chỉ hiện một lần
     const top = open[open.length - 1];
