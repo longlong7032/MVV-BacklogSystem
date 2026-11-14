@@ -10,6 +10,7 @@
 import { initBacklogList } from './backlog-list.js';
 import { initCrud } from './crud.js';
 import { initDialog } from './dialog.js';
+import { initGlobalErrors } from './errors.js';
 import { initDocuments } from './documents.js';
 import { initFeedbackForm } from './feedback-form.js';
 import { initMcp } from './mcp.js';
@@ -18,6 +19,7 @@ import { initUi } from './ui.js';
 import { initUsers } from './users.js';
 
 // Thứ tự quan trọng: crud đăng ký form dự án/team trước, form backlog và người dùng đăng ký sau
+initGlobalErrors(); // đầu tiên: để lỗi ở các init phía sau cũng được bắt
 initDialog();
 initUi();
 initCrud();

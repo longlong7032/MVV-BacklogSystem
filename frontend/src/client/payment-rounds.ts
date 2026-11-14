@@ -1,6 +1,7 @@
 import { api } from './api.js';
 import { $, closest, errorMessage, maybe, openModal, closeModal, setError, showToast } from './dom.js';
 import { confirmDialog } from './dialog.js';
+import { reportError } from './errors.js';
 
 interface PaymentRound {
   idPublic: string;
@@ -60,7 +61,7 @@ export function initPaymentRounds(): void {
       try {
         await api(invoiceProject.getAttribute('data-invoice-project') || '', { method: 'POST' });
         location.reload();
-      } catch (err) { showToast(errorMessage(err)); }
+      } catch (err) { await reportError(err); }
       return;
     }
     const close = closest(event, '[data-payment-close]');
@@ -82,7 +83,7 @@ export function initPaymentRounds(): void {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paid: !item.paid }),
         });
         location.reload();
-      } catch (err) { showToast(errorMessage(err)); }
+      } catch (err) { await reportError(err); }
       return;
     }
     const invoicePayment = closest(event, '[data-payment-invoice]');
@@ -95,7 +96,7 @@ export function initPaymentRounds(): void {
       try {
         await api(`/api/payments/${encodeURIComponent(item.idPublic)}/invoice-task`, { method: 'POST' });
         location.reload();
-      } catch (err) { showToast(errorMessage(err)); }
+      } catch (err) { await reportError(err); }
       return;
     }
     const remove = closest(event, '[data-payment-delete]');
@@ -109,7 +110,7 @@ export function initPaymentRounds(): void {
         await api(`/api/payments/${encodeURIComponent(item.idPublic)}`, { method: 'DELETE' });
         location.reload();
       } catch (err) {
-        showToast(errorMessage(err));
+        await reportError(err, 'Không xóa được');
       }
     }
   });

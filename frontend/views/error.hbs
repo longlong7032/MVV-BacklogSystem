@@ -1,12 +1,19 @@
-{{!-- Trang lỗi dùng chung (vd không kết nối được backend). Tham số: heading, message, hint? --}}
-<div class="mx-auto max-w-2xl">
-  {{> page_header title=heading}}
-  <div role="alert" class="alert alert-error items-start">
-    <svg class="h-6 w-6 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-8-5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 10 5Zm0 10a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd"/></svg>
-    <div>
-      <p class="font-semibold">{{message}}</p>
-      {{#if hint}}<p class="mt-1 text-sm">{{hint}}</p>{{/if}}
+{{!--
+  Trang lỗi dùng chung (404 / 500 / mất kết nối backend) — render bằng renderError() trong src/pages/errors.ts.
+  Tham số: status, heading, message, hint?, retry
+--}}
+<div class="mx-auto max-w-2xl py-6">
+  <div class="card border border-base-content/10 bg-base-100 shadow-sm">
+    <div class="card-body items-center text-center">
+      <span class="flex h-14 w-14 items-center justify-center rounded-full bg-error/15 text-2xl font-semibold text-error" aria-hidden="true">!</span>
+      <p class="mt-2 text-sm font-semibold uppercase tracking-wider text-base-content/50">Lỗi {{status}}</p>
+      <h1 class="text-2xl font-semibold tracking-tight">{{heading}}</h1>
+      <p class="mt-1 max-w-lg break-words text-base-content/80">{{message}}</p>
+      {{#if hint}}<p class="max-w-lg break-words text-sm text-base-content/60">{{hint}}</p>{{/if}}
+      <div class="mt-4 flex flex-wrap justify-center gap-2">
+        {{#if retry}}<a href="" class="btn btn-primary btn-sm">Thử lại</a>{{/if}}
+        <a href="/dashboard" class="btn btn-sm">Về tổng quan</a>
+      </div>
     </div>
   </div>
-  <div class="mt-4"><a href="" class="btn btn-sm">Thử lại</a></div>
 </div>

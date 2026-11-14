@@ -4,7 +4,7 @@
  */
 import { api, jsonBody } from './api.js';
 import { $, $$, closest, closeModal, data, errorMessage, maybe, openModal, setError, showToast } from './dom.js';
-import { alertDialog } from './dialog.js';
+import { reportError } from './errors.js';
 import { registerForm } from './crud.js';
 import type { DocumentStatus, ProjectDocument } from '../types.js';
 
@@ -129,7 +129,7 @@ function initDetail(): void {
       } catch (err) {
         markStatus(prev);
         if (statusText) statusText.textContent = '';
-        await alertDialog(errorMessage(err));
+        await reportError(err, 'Không đổi được trạng thái');
       }
       return;
     }

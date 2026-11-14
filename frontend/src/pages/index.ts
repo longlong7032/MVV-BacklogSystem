@@ -6,7 +6,8 @@
  * Thao tác thêm / sửa / xóa do JS phía trình duyệt gọi API `/api/...` (được proxy sang backend),
  * xong thì tải lại trang. Frontend không đọc DB và không import code của backend.
  */
-import type { Express, Request, Response } from 'express';
+import type { Express, NextFunction, Request, Response } from 'express';
+import { renderError } from './errors.js';
 import type { ActivityEntry, AuditEntry, Feedback, FeedbackStatus, McpInfo, PaymentRound, Project, ProjectDocument, ProjectMember, PublicUser, Team } from '../types.js';
 import { DOC_STATUSES, DOC_STATUS_KEYS, STATUSES, STATUS_KEYS, TONES, byName, countByStatus, fmtSize, isHttp, makeProgress, money, optionItems, qs, qstr } from './util.js';
 
@@ -846,20 +847,25 @@ export function registerPages(app: Express, deps: PagesDeps): void {
    */
   const page =
     <T>(view: string, tab: string, title: string, fetchData: (req: Request) => Promise<T>, build: (req: Request, data: T) => object) =>
-    async (req: Request, res: Response): Promise<void> => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+      // Chỉ lỗi LẤY DỮ LIỆU mới là "mất kết nối backend" (502); lỗi dựng view-model / render là lỗi code -> error handler chung (500)
+      let data: T;
       try {
-        const data = await fetchData(req);
-        res.render(view, { tab, title, version: deps.version, ...build(req, data) });
+        data = await fetchData(req);
       } catch (e) {
         console.error('[frontend] không lấy được dữ liệu từ backend:', (e as Error).message);
-        res.status(502).render('error', {
-          tab,
-          title: 'Lỗi kết nối backend',
-          version: deps.version,
+        return renderError(res, 502, {
           heading: 'Không kết nối được backend',
           message: (e as Error).message,
           hint: 'Kiểm tra biến BACKEND_URL của frontend trỏ đúng địa chỉ backend (khác địa chỉ frontend) và backend đang chạy.',
         });
+      }
+      try {
+        const model = build(req, data);
+        // View-model báo `missing` (vd dự án không tồn tại) -> trả 404 thật, không phải 200 với khung trống
+        res.status('missing' in model ? 404 : 200).render(view, { tab, title, version: deps.version, ...model });
+      } catch (e) {
+        next(e);
       }
     };
 

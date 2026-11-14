@@ -23,6 +23,9 @@ export interface ConfirmOptions {
 /** Hàm trả lời của hộp thoại đang mở (null = không có). */
 let settle: ((ok: boolean) => void) | null = null;
 
+/** Đang có hộp thoại mở không. */
+export const isDialogOpen = (): boolean => $('#dialogModal').classList.contains('modal-open');
+
 /** Gắn sự kiện cho hộp thoại (gọi một lần khi tải trang). */
 export function initDialog(): void {
   const modal = $('#dialogModal');

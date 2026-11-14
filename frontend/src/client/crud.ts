@@ -7,7 +7,8 @@
 import { api, jsonBody } from './api.js';
 import { $, closeModal, closest, data, errorMessage, itemOf, maybe, openModal, setError } from './dom.js';
 import type { Field } from './dom.js';
-import { alertDialog, confirmDialog } from './dialog.js';
+import { confirmDialog } from './dialog.js';
+import { reportError } from './errors.js';
 
 /** Hàm mở một form (null = thêm mới, đối tượng = sửa). */
 type Opener = (item: any) => void;
@@ -256,7 +257,7 @@ export function initCrud(): void {
         await api(`/api/${data(act, 'resource') || 'feedbacks'}/${data(act, 'id')}`, { method: 'DELETE' });
         location.reload();
       } catch (err) {
-        await alertDialog(errorMessage(err), 'Không xóa được');
+        await reportError(err, 'Không xóa được');
       }
     }
   });

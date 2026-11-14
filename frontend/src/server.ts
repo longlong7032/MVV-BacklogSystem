@@ -26,6 +26,7 @@ import {
   loadUsers,
 } from './backend.js';
 import { ROOT_DIR } from './lib/paths.js';
+import { registerErrorHandlers } from './pages/errors.js';
 import { registerPages } from './pages/index.js';
 import { HELPERS } from './pages/util.js';
 
@@ -102,7 +103,9 @@ const IS_PROD = process.env.NODE_ENV === 'production' || Boolean(process.env.VER
 app.use('/public', express.static(path.join(ROOT_DIR, 'public'), IS_PROD ? { maxAge: '10m' } : { etag: true, maxAge: 0, setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache') }));
 
 /* ---------- Các trang ---------- */
+app.locals.version = version; // layout.hbs hiển thị phiên bản ở mọi trang (kể cả trang lỗi)
 registerPages(app, { version, loadData, loadUsers, loadMcpInfo });
+registerErrorHandlers(app); // 404 + lỗi bất ngờ: phải đặt sau mọi route
 
 // Cấu hình backend sai: báo ngay khi khởi động (trên Vercel hiện trong Function Logs)
 if (BACKEND_CONFIG_ERROR) console.error(`[frontend] ${BACKEND_CONFIG_ERROR}`);

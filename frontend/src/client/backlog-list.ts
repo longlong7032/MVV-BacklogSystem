@@ -4,7 +4,7 @@
  */
 import { api, jsonBody } from './api.js';
 import { $$, closest, data, errorMessage, maybe, openModal, closeModal, showToast } from './dom.js';
-import { alertDialog } from './dialog.js';
+import { reportError } from './errors.js';
 import type { Feedback } from '../types.js';
 
 /** Gọi PATCH cho một backlog. */
@@ -16,7 +16,7 @@ async function patchAndReload(id: string, body: object): Promise<void> {
   try {
     await patchStatus(id, (body as { status: string }).status);
   } catch (err) {
-    await alertDialog(errorMessage(err));
+    await reportError(err, 'Không đổi được trạng thái');
   }
   location.reload();
 }
@@ -69,7 +69,7 @@ function initDetail(): void {
     } catch (err) {
       revert();
       if (statusText) statusText.textContent = '';
-      await alertDialog(errorMessage(err));
+      await reportError(err, 'Không đổi được trạng thái');
     }
   };
 

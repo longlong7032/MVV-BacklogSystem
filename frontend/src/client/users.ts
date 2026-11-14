@@ -4,7 +4,8 @@
  */
 import { api, jsonBody } from './api.js';
 import { $, $$, closest, data, errorMessage, maybe, openModal, setError } from './dom.js';
-import { alertDialog, confirmDialog } from './dialog.js';
+import { confirmDialog } from './dialog.js';
+import { reportError } from './errors.js';
 import type { Field } from './dom.js';
 import { field, registerForm, setField, simpleForm } from './crud.js';
 import type { PublicUser } from '../types.js';
@@ -88,7 +89,7 @@ export function initUsers(): void {
         location.reload();
       }
     } catch (err) {
-      await alertDialog(errorMessage(err));
+      await reportError(err);
     }
   });
 }
