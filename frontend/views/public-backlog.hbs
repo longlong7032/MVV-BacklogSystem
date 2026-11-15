@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="corporate">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{{title}} · Feedback backlog</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.24/dist/full.min.css" rel="stylesheet" type="text/css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui'] } } } };
+  </script>
+</head>
+<body class="min-h-screen bg-base-200 font-sans antialiased">
+<main class="mx-auto max-w-5xl px-4 py-8">
+  <header class="mb-6">
+    <p class="text-sm opacity-60">Nexus IT · Project Operations</p>
+    <h1 class="mt-1 text-2xl font-bold">Danh sách backlog</h1>
+    <p class="mt-1 text-sm opacity-70">Trang chỉ xem, dữ liệu tại thời điểm tải trang. Tổng cộng <b>{{total}}</b> mục.</p>
+  </header>
+
+  <div class="overflow-x-auto rounded-box border border-base-content/10 bg-base-100 shadow-sm">
+    <table class="table w-full min-w-[640px]">
+      <thead>
+        <tr>
+          <th class="w-16">STT</th>
+          <th>Tên dự án</th>
+          <th>Tiêu đề</th>
+          <th>Loại</th>
+          <th>Team</th>
+          <th>Trạng thái</th>
+          <th class="w-24">Có ảnh</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each rows}}
+        <tr class="align-top">
+          <td class="text-base-content/60">{{stt}}</td>
+          <td>{{project}}</td>
+          <td class="font-medium">{{#if title}}{{title}}{{else}}Chưa đặt tên{{/if}}</td>
+          <td>{{#if type}}{{type}}{{else}}<span class="text-base-content/40">—</span>{{/if}}</td>
+          <td>{{#if team}}{{team}}{{else}}<span class="text-base-content/40">Chưa phân công</span>{{/if}}</td>
+          <td><span class="badge badge-sm whitespace-nowrap {{statusBadge}}">{{statusLabel}}</span></td>
+          <td>{{#if hasImage}}Có{{else}}<span class="text-base-content/40">Không</span>{{/if}}</td>
+        </tr>
+        {{else}}
+        <tr><td colspan="7" class="py-10 text-center text-base-content/60">Chưa có backlog nào.</td></tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-4 text-center text-xs opacity-50">v{{version}}</p>
+</main>
+</body>
+</html>

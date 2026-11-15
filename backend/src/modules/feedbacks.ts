@@ -8,6 +8,7 @@
  *   PATCH  /api/feedbacks/:id/team        { team_id }
  *   DELETE /api/feedbacks/:id             xóa mềm
  *   GET    /api/export                    ?project&team&type&status&q  -> file .xlsx
+ *   GET    /api/public/backlog            ?project&team&type&status&q  -> danh sách rút gọn cho người vãng lai (ẩn id, HAR)
  */
 import { Router } from 'express';
 import type { Request } from 'express';
@@ -295,6 +296,46 @@ feedbacksRouter.delete(
     await q('UPDATE feedback_attachments SET deleted_at = now() WHERE feedback_id = $1 AND deleted_at IS NULL', [id]);
     await recordActivity({ projectId: row.project_id, entityType: 'backlog', entityPublicId: row.id_public, entityTitle: row.title || `Backlog #${row.stt}`, action: 'deleted', actor: 'Thành viên', details: ['Xóa backlog'] });
     res.json({ ok: true });
+  })
+);
+
+/* ---------- Danh sách công khai (người dùng vãng lai) ---------- */
+
+/**
+ * GET /api/public/backlog?project&team&type&status&q
+ * Chỉ trả các cột an toàn: STT, tên dự án, tiêu đề, loại, team, trạng thái, có ảnh hay không.
+ * KHÔNG trả id, mô tả lỗi, URL, ghi chú, link ảnh hay file HAR.
+ */
+feedbacksRouter.get(
+  '/public/backlog',
+  route(async (req, res) => {
+    const project = uuidParam(req.query.project);
+    const teamFilter = str(req.query.team);
+    const typeFilter = str(req.query.type);
+    const status = str(req.query.status);
+    const needle = str(req.query.q).toLowerCase();
+    const rows = await q(`${SELECT} WHERE f.deleted_at IS NULL AND p.deleted_at IS NULL AND ($1::uuid IS NULL OR p.id_public = $1::uuid) ORDER BY p.name, f.stt`, [project || null]);
+    const meta = new Map(rows.map((r) => [r.id_public, r]));
+    const items = (await toFeedbacks(rows))
+      .filter((f) => !status || f.status === status)
+      .filter((f) => !teamFilter || (teamFilter === 'none' ? !f.teamId : f.teamId === teamFilter))
+      .filter((f) => !typeFilter || (typeFilter === 'none' ? !f.type : sameName(f.type, typeFilter)))
+      .filter((f) => {
+        const m = meta.get(f.idPublic)!;
+        return !needle || [m.project_name, f.type, m.team_name, f.title].some((s) => String(s || '').toLowerCase().includes(needle));
+      })
+      .map((f) => ({
+        stt: f.stt,
+        project: String(meta.get(f.idPublic)!.project_name || ''),
+        title: f.title,
+        type: f.type,
+        team: String(meta.get(f.idPublic)!.team_name || ''),
+        status: f.status,
+        statusLabel: STATUS_LABELS[f.status],
+        hasImage: Boolean(f.location.image || f.bug.images.length || f.expected.images.length),
+      }));
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ total: items.length, items });
   })
 );
 

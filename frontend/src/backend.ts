@@ -82,6 +82,19 @@ export async function backendGet<T>(req: Request, path: string): Promise<Backend
 }
 
 /** Lấy dự án, team, backlog, ...: MỘT request `/api/bootstrap`; ném lỗi nếu backend trả lỗi. */
+/** Một dòng trong trang xem công khai (không có id / HAR). */
+export interface PublicBacklogItem { stt: number; project: string; title: string; type: string; team: string; status: string; statusLabel: string; hasImage: boolean }
+
+/** Danh sách backlog rút gọn cho người vãng lai (API công khai, truyền nguyên bộ lọc từ query string). */
+export async function loadPublicBacklog(req: Request): Promise<{ total: number; items: PublicBacklogItem[] }> {
+  const allowed = ['project', 'team', 'type', 'status', 'q'];
+  const params = new URLSearchParams();
+  for (const k of allowed) if (typeof req.query[k] === 'string' && req.query[k]) params.set(k, req.query[k] as string);
+  const r = await backendGet<{ total: number; items: PublicBacklogItem[] }>(req, `/api/public/backlog${params.size ? `?${params}` : ''}`);
+  if (!r.ok) throw new Error(`backend trả HTTP ${r.status}: ${r.body.error ?? ''}`);
+  return r.body;
+}
+
 export async function loadData(req: Request): Promise<Data> {
   const r = await backendGet<Data>(req, '/api/bootstrap');
   if (!r.ok) throw new Error(`backend trả HTTP ${r.status}: ${r.body.error ?? ''}`);

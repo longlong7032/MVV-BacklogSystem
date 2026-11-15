@@ -3,3 +3,6 @@ _obsolete
 chrome-extension/background.js
 chrome-extension/devtools.js
 chrome-extension/popup.js
+
+# Chứa token cá nhân, không commit (mẫu: .mcp.json.example)
+.mcp.json

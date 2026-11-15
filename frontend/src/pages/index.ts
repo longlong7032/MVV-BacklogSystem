@@ -8,6 +8,7 @@
  */
 import type { Express, NextFunction, Request, Response } from 'express';
 import { renderError } from './errors.js';
+import type { PublicBacklogItem } from '../backend.js';
 import type { ActivityEntry, AuditEntry, Feedback, FeedbackStatus, McpInfo, PaymentRound, Profile, Project, ProjectDocument, ProjectMember, PublicUser, Team } from '../types.js';
 import { DOC_STATUSES, DOC_STATUS_KEYS, STATUSES, STATUS_KEYS, TONES, byName, countByStatus, fmtSize, isHttp, makeProgress, money, optionItems, qs, qstr } from './util.js';
 
@@ -41,6 +42,8 @@ export interface PagesDeps {
   loadMcpInfo: (req: Request) => Promise<McpInfo>;
   /** Hồ sơ người đang đăng nhập (null = chưa đăng nhập). */
   loadProfile: (req: Request) => Promise<Profile | null>;
+  /** Danh sách backlog rút gọn cho người vãng lai (không cần đăng nhập). */
+  loadPublicBacklog: (req: Request) => Promise<{ total: number; items: PublicBacklogItem[] }>;
 }
 
 /** Địa chỉ gốc của web app, dùng dựng URL MCP: PUBLIC_URL hoặc theo request. */
@@ -355,6 +358,7 @@ function backlogModel(req: Request, db: Data, scope?: BacklogScope) {
       nextHref: page < pages ? href({ page: page + 1 }) : '',
     },
     exportHref: `/api/export${qs({ project: fProject, status, team: fTeam, type: fType, q })}`,
+    publicHref: `/view/backlog${qs({ project: fProject, status, team: fTeam, type: fType, q })}`,
     // Dữ liệu cho form thêm / sửa (modal) — server render sẵn mọi lựa chọn
     form: {
       projects: optionItems(
@@ -926,5 +930,22 @@ export function registerPages(app: Express, deps: PagesDeps): void {
       profile ? { profile, roleLabel: ROLE_LABEL[profile.role] ?? profile.role } : { redirect: '/login?next=%2Fprofile' }
     )
   );
+  // Trang xem công khai cho người vãng lai: chỉ đọc, không có id / HAR / mô tả lỗi, không cần đăng nhập
+  app.get('/view/backlog', async (req, res, next) => {
+    let data: { total: number; items: PublicBacklogItem[] };
+    try {
+      data = await deps.loadPublicBacklog(req);
+    } catch (e) {
+      console.error('[frontend] không lấy được dữ liệu từ backend:', (e as Error).message);
+      return renderError(res, 502, { heading: 'Không kết nối được backend', message: (e as Error).message, hint: 'Vui lòng thử lại sau.' });
+    }
+    try {
+      const rows = data.items.map((i) => ({ ...i, statusBadge: STATUSES[i.status as FeedbackStatus]?.badge ?? 'badge-ghost' }));
+      res.setHeader('X-Robots-Tag', 'noindex');
+      res.render('public-backlog', { layout: false, title: 'Danh sách backlog', version: deps.version, total: data.total, rows, today: new Date().toISOString() });
+    } catch (e) {
+      next(e);
+    }
+  });
   app.get('/mcp-guide', page('mcp', 'mcp', 'Kết nối MCP', deps.loadMcpInfo, mcpModel));
 }
