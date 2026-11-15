@@ -56,9 +56,9 @@
               {{#if hasToken}}<code class="kbd kbd-sm">{{tokenHint}}</code>{{else}}{{> dash}}{{/if}}
               <p class="mt-1 text-sm text-base-content/50">{{#if hasToken}}Cấp {{fmtDate tokenCreatedAt}} · {{#if lastUsedAt}}dùng {{timeAgo lastUsedAt}}{{else}}chưa dùng{{/if}}{{else}}Cần cấp token để kết nối{{/if}}</p>
             </td>
-            <td><span class="badge {{statusClass}}">{{statusLabel}}</span></td>
+            <td><span class="badge whitespace-nowrap {{statusClass}}">{{statusLabel}}</span></td>
             <td>
-              <div class="flex flex-wrap justify-end gap-1">
+              <div class="flex flex-wrap justify-end gap-1 [&>.btn]:whitespace-nowrap">
                 <button type="button" data-act="edit" class="btn btn-ghost btn-xs">Sửa</button>
                 <button type="button" data-act="token" data-id="{{id}}" data-name="{{name}}" data-has-token="{{hasToken}}" class="btn btn-ghost btn-xs">{{#if hasToken}}Cấp lại token{{else}}Cấp token{{/if}}</button>
                 {{#if hasToken}}<button type="button" data-act="revoke" data-id="{{id}}" data-name="{{name}}" class="btn btn-ghost btn-xs text-error">Thu hồi</button>{{/if}}

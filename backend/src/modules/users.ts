@@ -445,7 +445,8 @@ usersRouter.delete(
   route(async (req, res) => {
     const id = (await privateId('users', req.params.id as string, true)) ?? notFound('Không tìm thấy người dùng.');
     const before = await loadUser(id);
-    if (await isLastAdmin(before)) bad(LAST_ADMIN_ERROR);
+    // Admin cuối cùng vẫn đăng nhập được bằng mật khẩu thì thu hồi token (kết nối MCP) không làm mất quyền quản trị
+    if (!before.password_hash && (await isLastAdmin(before))) bad(LAST_ADMIN_ERROR);
     await q("UPDATE users SET token_hash = '', token_hint = '', token_created_at = NULL WHERE id_private = $1", [id]);
     await audit(adminName(req), 'thu hồi token', before.name);
     res.json(toPublicUser(await loadUser(id)));
