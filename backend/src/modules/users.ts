@@ -3,6 +3,9 @@
  *
  *   POST   /api/admin/login          { email, password } | { token }  -> đặt cookie phiên fb_admin
  *   DELETE /api/admin/session        đăng xuất (xóa mềm phiên)
+ *   GET    /api/admin/me             (admin) hồ sơ của chính mình
+ *   PUT    /api/admin/me             (admin) đổi tên hiển thị
+ *   POST   /api/admin/password       (admin) đổi mật khẩu { current, next } — các phiên khác bị đăng xuất
  *   GET    /api/users                (admin) danh sách người dùng
  *   GET    /api/users/audit          (admin) 50 dòng nhật ký quản trị mới nhất
  *   POST   /api/users                (admin) tạo người dùng + cấp token (token trả về đúng 1 lần)
@@ -209,7 +212,7 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
     if (!(await hasOtherActiveAdmin(0))) {
       res.status(503).json({
         code: 'admin-setup',
-        error: 'Chưa có quản trị viên nào. Đặt ADMIN_EMAIL + ADMIN_PASSWORD trong .env rồi khởi động lại, hoặc chạy: npm run create-admin -- "Họ tên" email@congty.vn',
+        error: 'Chưa có quản trị viên nào. Tạo tài khoản đầu tiên bằng lệnh: npm run create-admin -- "Họ tên" email@congty.vn "mật-khẩu"',
       });
       return;
     }
@@ -266,42 +269,6 @@ async function detachUser(id: number): Promise<void> {
   await q('UPDATE feedbacks SET assignee_id = NULL WHERE assignee_id = $1', [id]);
 }
 
-/* ---------- Admin cứng từ .env ---------- */
-
-/**
- * ADMIN_EMAIL + ADMIN_PASSWORD trong .env -> mỗi lần khởi động đảm bảo tài khoản này tồn tại, là admin,
- * đang hoạt động và có đúng mật khẩu đó (chỉ lưu băm).
- */
-export async function seedAdmin(): Promise<void> {
-  const email = str(process.env.ADMIN_EMAIL).toLowerCase();
-  const password = process.env.ADMIN_PASSWORD || '';
-  if (!email && !password) return;
-  if (!EMAIL_RE.test(email) || password.length < 8) {
-    console.warn('[Admin] ADMIN_EMAIL không hợp lệ hoặc ADMIN_PASSWORD ngắn hơn 8 ký tự -> bỏ qua admin cứng.');
-    return;
-  }
-  await tx(async () => {
-    let user = await q1('SELECT * FROM users WHERE email = $1 AND deleted_at IS NULL FOR UPDATE', [email]);
-    let changed = false;
-    if (!user) {
-      user = await q1('INSERT INTO users (id_public, name, email, role) VALUES ($1, $2, $3, $4) RETURNING *', [uuidv7(), str(process.env.ADMIN_NAME) || email.split('@')[0], email, 'admin']);
-      changed = true;
-    }
-    if (user!.role !== 'admin' || !user!.active) {
-      await q("UPDATE users SET role = 'admin', active = true WHERE id_private = $1", [user!.id_private]);
-      changed = true;
-    }
-    if (!verifyPassword(password, user!.password_hash)) {
-      await q('UPDATE users SET password_hash = $2 WHERE id_private = $1', [user!.id_private, hashPassword(password)]);
-      changed = true;
-    }
-    if (changed) {
-      await audit('hệ thống', 'đảm bảo admin cứng từ .env', user!.name);
-      console.log(`[Admin] Đã đảm bảo admin: ${user!.name} <${email}>`);
-    }
-  });
-}
-
 /* ---------- Routes ---------- */
 
 export const usersRouter = Router();
@@ -352,6 +319,55 @@ usersRouter.delete(
     const token = bearer(req) || getCookie(req, ADMIN_COOKIE);
     if (token.startsWith(SESSION_PREFIX)) await q('UPDATE sessions SET deleted_at = now() WHERE token_hash = $1 AND deleted_at IS NULL', [hashToken(token)]);
     setAdminCookie(req, res, '');
+    res.json({ ok: true });
+  })
+);
+
+/** Hồ sơ của người đang đăng nhập (bỏ qua nếu chạy DEV_NO_AUTH vì không có tài khoản thật). */
+async function currentRow(req: Request): Promise<Record<string, any>> {
+  const id = req.admin?.idPrivate ?? 0;
+  if (!id) bad('Đang chạy chế độ DEV_NO_AUTH nên không có tài khoản đăng nhập thật.');
+  return (await q1('SELECT * FROM users WHERE id_private = $1 AND deleted_at IS NULL', [id])) ?? notFound('Không tìm thấy tài khoản.');
+}
+
+const toProfile = (r: Record<string, any>) => ({ name: r.name, email: r.email, role: r.role, hasPassword: Boolean(r.password_hash), lastUsedAt: iso(r.last_used_at), createdAt: isoReq(r.created_at) });
+
+usersRouter.get('/admin/me', requireAdmin, route(async (req, res) => void res.json(toProfile(await currentRow(req)))));
+
+usersRouter.put(
+  '/admin/me',
+  requireAdmin,
+  route(async (req, res) => {
+    const row = await currentRow(req);
+    const name = str((req.body || {}).name);
+    if (!name) bad('Vui lòng nhập tên hiển thị.');
+    if (name.length > 120) bad('Tên tối đa 120 ký tự.');
+    await q('UPDATE users SET name = $2 WHERE id_private = $1', [row.id_private, name]);
+    await audit(name, 'đổi tên hiển thị', row.name === name ? name : `${row.name} → ${name}`);
+    res.json(toProfile({ ...row, name }));
+  })
+);
+
+usersRouter.post(
+  '/admin/password',
+  requireAdmin,
+  route(async (req, res) => {
+    const row = await currentRow(req);
+    const body = req.body || {};
+    const current = typeof body.current === 'string' ? body.current.slice(0, 200) : '';
+    const next = typeof body.next === 'string' ? body.next.slice(0, 200) : '';
+    // Tài khoản chưa có mật khẩu (chỉ đăng nhập bằng token) được đặt lần đầu mà không cần mật khẩu cũ
+    if (row.password_hash && !verifyPassword(current, row.password_hash)) {
+      adminBadAuth.hit(req.ip || 'unknown');
+      throw new HttpError(400, 'Mật khẩu hiện tại không đúng.');
+    }
+    if (next.length < 8) bad('Mật khẩu mới tối thiểu 8 ký tự.');
+    if (next === current) bad('Mật khẩu mới phải khác mật khẩu hiện tại.');
+    await q('UPDATE users SET password_hash = $2 WHERE id_private = $1', [row.id_private, hashPassword(next)]);
+    // Đăng xuất mọi phiên khác của tài khoản này (giữ phiên đang dùng)
+    const keep = getCookie(req, ADMIN_COOKIE);
+    await q('UPDATE sessions SET deleted_at = now() WHERE user_id = $1 AND deleted_at IS NULL AND token_hash <> $2', [row.id_private, keep ? hashToken(keep) : '']);
+    await audit(row.name, 'đổi mật khẩu', row.name);
     res.json({ ok: true });
   })
 );

@@ -27,7 +27,7 @@ import { projectsRouter, listProjects } from './modules/projects.js';
 import { feedbacksRouter, listFeedbacks, setFeedbackStatus, assignFeedbackTeam } from './modules/feedbacks.js';
 import { paymentsRouter, listPayments } from './modules/payments.js';
 import { documentsRouter, listDocuments } from './modules/documents.js';
-import { usersRouter, listProjectMembers, seedAdmin, makeLimiter, findUserByToken, touchLastUsed, bearer, DEV_NO_AUTH } from './modules/users.js';
+import { usersRouter, listProjectMembers, makeLimiter, findUserByToken, touchLastUsed, bearer, DEV_NO_AUTH } from './modules/users.js';
 import type { McpInfo } from './types.js';
 
 const { version } = createRequire(import.meta.url)(path.join(ROOT_DIR, 'package.json')) as { version: string };
@@ -47,12 +47,11 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: '256kb' }));
 
-/* ---------- Khởi tạo: migrate schema + admin cứng (một lần mỗi instance; lỗi thì thử lại ở request sau) ---------- */
+/* ---------- Khởi tạo: migrate schema (một lần mỗi instance; lỗi thì thử lại ở request sau) ---------- */
 let readyPromise: Promise<void> | null = null;
 const ensureReady = (): Promise<void> =>
   (readyPromise ||= (async () => {
     await runMigrations();
-    await seedAdmin();
   })().catch((e) => {
     readyPromise = null;
     throw e;

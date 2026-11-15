@@ -39,13 +39,13 @@ Mở http://localhost:4000. Chạy bản build: `npm run start:backend` và `npm
 - Giao diện là các file `frontend/views/*.hbs` + `views/partials/*.hbs`: sửa rồi tải lại trang là thấy. Sửa `frontend/src/client/*.ts` thì chạy lại `npm --prefix frontend run build:client`.
 - Mỗi project cũng chạy độc lập: `cd backend && npm run dev`, `cd frontend && npm run dev`.
 - Schema tự migrate khi backend khởi động (hoặc chạy tay `npm --prefix backend run db:migrate`). Xóa sạch dữ liệu local: `docker compose down -v`.
-- Tạo admin bằng dòng lệnh: `npm --prefix backend run create-admin -- "Họ tên" email@congty.vn` (in token một lần).
+- Tạo admin bằng dòng lệnh: `npm --prefix backend run create-admin -- "Họ tên" email@congty.vn "mật-khẩu"` (không có mật khẩu thì in token một lần). Tài khoản lưu trong DB; đăng nhập ở `/login`, đổi mật khẩu ở `/profile`.
 
 ## Biến môi trường
 
 | Project | File | Biến chính |
 |---|---|---|
-| backend | `backend/.env` (mẫu: `backend/.env.example`) | `PORT`, `DATABASE_URL` (**bắt buộc**), `R2_*`, `ADMIN_EMAIL` / `ADMIN_PASSWORD`, `PUBLIC_URL`, `MCP_READONLY`, `TRUST_PROXY` |
+| backend | `backend/.env` (mẫu: `backend/.env.example`) | `PORT`, `DATABASE_URL` (**bắt buộc**), `R2_*`, `PUBLIC_URL`, `MCP_READONLY`, `TRUST_PROXY` |
 | frontend | `frontend/.env` (mẫu: `frontend/.env.example`) | `PORT`, `BACKEND_URL`, `TRUST_PROXY`, `PUBLIC_URL` |
 
 `PUBLIC_URL` của backend nên là địa chỉ công khai của **frontend** (vì ảnh / HAR được phục vụ qua `/uploads/...` của frontend khi MCP dựng link).
@@ -62,7 +62,6 @@ Backend bắt buộc có Postgres (`DATABASE_URL`). Điền thêm 4 biến `R2_A
    |---|---|
    | `DATABASE_URL` | Chuỗi kết nối Postgres (Neon). Cũng nhận `POSTGRES_URL`, `POSTGRES_PRISMA_URL`, `NEON_DATABASE_URL` hoặc biến nào có dạng `postgresql://...` |
    | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | Cloudflare R2 (không bắt buộc) |
-   | `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_NAME` | Admin cứng — **đặt mật khẩu mạnh, khác môi trường local** |
    | `PUBLIC_URL` | Địa chỉ công khai của frontend, vd `https://mvv-backlog.vercel.app` |
 
 2. **Project frontend** — Environment Variables: `BACKEND_URL` (địa chỉ project backend, vd `https://mvv-backlog-api.vercel.app`) và tùy chọn `PUBLIC_URL`.
@@ -147,7 +146,7 @@ claude mcp add --transport http feedback-backlog https://<host>/mcp --header "Au
 Quản trị viên đăng nhập trang Người dùng bằng **email + mật khẩu** (admin cứng đặt trong `.env`, xem bên dưới) hoặc bằng **token cá nhân**. Ngoài ra có thể tạo admin bằng lệnh chạy trên server:
 
 ```bash
-npm --prefix backend run create-admin -- "Họ tên" email@congty.vn   # in token một lần; chạy lại với email cũ = cấp lại token
+npm --prefix backend run create-admin -- "Họ tên" email@congty.vn "mật-khẩu"   # có mật khẩu: đặt mật khẩu đăng nhập; bỏ mật khẩu: in token một lần. Chạy lại với email cũ = cập nhật
 ```
 
 Không thể xóa / hạ quyền / vô hiệu hóa / thu hồi token của quản trị viên hoạt động cuối cùng. Mọi thao tác quản trị được ghi vào "Nhật ký hoạt động" trên trang Người dùng; thay đổi trạng thái / giao team qua MCP ghi nhận "cập nhật bởi <tên>".
@@ -156,7 +155,6 @@ Không thể xóa / hạ quyền / vô hiệu hóa / thu hồi token của quả
 
 | Biến | Tác dụng |
 |---|---|
-| `ADMIN_EMAIL` + `ADMIN_PASSWORD` | Admin cứng: mỗi lần khởi động đảm bảo tài khoản này là admin đang hoạt động với đúng mật khẩu (tối thiểu 8 ký tự, lưu dạng băm scrypt). `ADMIN_NAME` đặt tên hiển thị. Đổi mật khẩu trong `.env` rồi khởi động lại |
 | `MCP_READONLY=1` | Ép toàn server chỉ đọc, bất kể quyền từng người |
 | `PUBLIC_URL` | Địa chỉ công khai của web app, dùng dựng link ảnh / HAR (mặc định lấy theo request) |
 | `TRUST_PROXY` | Số proxy phía trước app (mặc định 1 = nginx). Không có proxy thì đặt `0` |

@@ -9,7 +9,7 @@
  * chính frontend (nếu trỏ nhầm, proxy `/api` sẽ gọi lại chính nó vô hạn).
  */
 import type { Request } from 'express';
-import type { ActivityEntry, AuditEntry, Feedback, McpInfo, PaymentRound, Project, ProjectDocument, ProjectMember, PublicUser, Team } from './types.js';
+import type { ActivityEntry, AuditEntry, Feedback, McpInfo, PaymentRound, Profile, Project, ProjectDocument, ProjectMember, PublicUser, Team } from './types.js';
 import type { Data, UsersData } from './pages/index.js';
 
 /** Địa chỉ backend mặc định khi chạy local (khớp PORT mặc định của backend). */
@@ -104,4 +104,10 @@ export async function loadMcpInfo(req: Request): Promise<McpInfo> {
   const info = await backendGet<McpInfo>(req, '/api/mcp-info');
   if (!info.ok) throw new Error(`backend trả HTTP ${info.status}`);
   return info.body;
+}
+
+/** Hồ sơ người đang đăng nhập; chưa đăng nhập (401/403/429) hoặc chưa có admin (503) -> null. */
+export async function loadProfile(req: Request): Promise<Profile | null> {
+  const r = await backendGet<Profile>(req, '/api/admin/me');
+  return r.ok ? r.body : null;
 }

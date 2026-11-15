@@ -8,7 +8,7 @@
  */
 import type { Express, NextFunction, Request, Response } from 'express';
 import { renderError } from './errors.js';
-import type { ActivityEntry, AuditEntry, Feedback, FeedbackStatus, McpInfo, PaymentRound, Project, ProjectDocument, ProjectMember, PublicUser, Team } from '../types.js';
+import type { ActivityEntry, AuditEntry, Feedback, FeedbackStatus, McpInfo, PaymentRound, Profile, Project, ProjectDocument, ProjectMember, PublicUser, Team } from '../types.js';
 import { DOC_STATUSES, DOC_STATUS_KEYS, STATUSES, STATUS_KEYS, TONES, byName, countByStatus, fmtSize, isHttp, makeProgress, money, optionItems, qs, qstr } from './util.js';
 
 /** Dữ liệu dùng chung của các trang, lấy từ backend. */
@@ -39,6 +39,8 @@ export interface PagesDeps {
   loadUsers: (req: Request) => Promise<UsersData>;
   /** Thông tin cấu hình MCP / xác thực từ backend. */
   loadMcpInfo: (req: Request) => Promise<McpInfo>;
+  /** Hồ sơ người đang đăng nhập (null = chưa đăng nhập). */
+  loadProfile: (req: Request) => Promise<Profile | null>;
 }
 
 /** Địa chỉ gốc của web app, dùng dựng URL MCP: PUBLIC_URL hoặc theo request. */
@@ -914,5 +916,11 @@ export function registerPages(app: Express, deps: PagesDeps): void {
       });
     }
   });
+  app.get(
+    '/profile',
+    page('profile', 'profile', 'Hồ sơ', deps.loadProfile, (req, profile) =>
+      profile ? { profile, roleLabel: ROLE_LABEL[profile.role] ?? profile.role } : { redirect: '/login?next=%2Fprofile' }
+    )
+  );
   app.get('/mcp-guide', page('mcp', 'mcp', 'Kết nối MCP', deps.loadMcpInfo, mcpModel));
 }

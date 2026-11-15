@@ -231,3 +231,13 @@ export interface HarCookie {
 export interface Har {
   log: { entries: HarEntry[]; [key: string]: unknown };
 }
+
+/** Hồ sơ của người đang đăng nhập (GET /api/admin/me). */
+export interface Profile {
+  name: string;
+  email: string;
+  role: Role;
+  hasPassword: boolean;
+  lastUsedAt: string | null;
+  createdAt: string;
+}

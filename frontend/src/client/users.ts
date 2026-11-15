@@ -142,7 +142,7 @@ export function initLogin(): void {
   $$('[data-logout]').forEach((btn) =>
     btn.addEventListener('click', async () => {
       await api('/api/admin/session', { method: 'DELETE' }).catch(() => {});
-      location.reload();
+      location.assign('/login');
     })
   );
 }

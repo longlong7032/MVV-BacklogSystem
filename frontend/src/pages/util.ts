@@ -84,6 +84,8 @@ export const HELPERS: Record<string, (...args: any[]) => unknown> = {
   /** Chuỗi JSON để nhúng vào thuộc tính data-* (Handlebars tự escape khi in ra). */
   json: (value: unknown) => JSON.stringify(value),
   eq: (a: unknown, b: unknown) => a === b,
+  /** Chữ cái đầu (viết hoa) của tên, dùng cho avatar. */
+  initial: (name: unknown) => (typeof name === 'string' && name.trim() ? [...name.trim()][0]!.toUpperCase() : '?'),
   /** Class của liên kết trên sidebar (DaisyUI `menu`): tab đang mở có class `active`. */
   navClass: (tab: unknown, key: unknown) => (tab === key ? 'active' : ''),
 };
