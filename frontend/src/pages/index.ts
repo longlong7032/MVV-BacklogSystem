@@ -550,6 +550,7 @@ function teamsModel(req: Request, db: Data) {
 const ROLE_LABEL: Record<string, string> = { read: 'Chỉ đọc', write: 'Đọc + ghi', admin: 'Quản trị viên' };
 
 function usersModel(req: Request, db: Data, u: UsersData) {
+  if (u.state === 'locked') return { redirect: `/login?next=${encodeURIComponent(req.originalUrl)}` };
   if (u.state !== 'ok') return { state: u.state };
 
   const q = qstr(req.query.q).toLowerCase();
@@ -862,6 +863,8 @@ export function registerPages(app: Express, deps: PagesDeps): void {
       }
       try {
         const model = build(req, data);
+        // View-model yêu cầu chuyển hướng (vd chưa đăng nhập -> /login)
+        if ('redirect' in model && typeof model.redirect === 'string') return void res.redirect(model.redirect);
         // View-model báo `missing` (vd dự án không tồn tại) -> trả 404 thật, không phải 200 với khung trống
         res.status('missing' in model ? 404 : 200).render(view, { tab, title, version: deps.version, ...model });
       } catch (e) {
@@ -894,5 +897,22 @@ export function registerPages(app: Express, deps: PagesDeps): void {
       (req, d) => usersModel(req, d.data, d.users)
     )
   );
+  // Đăng nhập quản trị: đã đăng nhập -> về trang đích; chưa có admin -> hướng dẫn tạo
+  app.get('/login', async (req, res, next) => {
+    try {
+      const u = await deps.loadUsers(req);
+      const nextRaw = qstr(req.query.next);
+      const next_ = /^\/(?![/\\])/.test(nextRaw) ? nextRaw : '/users';
+      if (u.state === 'ok') return void res.redirect(next_);
+      res.render('login', { layout: false, title: 'Đăng nhập', version: deps.version, state: u.state, next: next_ });
+    } catch (e) {
+      console.error('[frontend] không lấy được dữ liệu từ backend:', (e as Error).message);
+      renderError(res, 502, {
+        heading: 'Không kết nối được backend',
+        message: (e as Error).message,
+        hint: 'Kiểm tra biến BACKEND_URL của frontend trỏ đúng địa chỉ backend và backend đang chạy.',
+      });
+    }
+  });
   app.get('/mcp-guide', page('mcp', 'mcp', 'Kết nối MCP', deps.loadMcpInfo, mcpModel));
 }

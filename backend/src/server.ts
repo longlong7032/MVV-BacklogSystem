@@ -21,13 +21,13 @@ import { tx, txMiddleware } from './db/pool.js';
 import { runMigrations } from './db/migrate.js';
 import { createMcpServer } from './mcp/server.js';
 import type { Backend } from './mcp/server.js';
-import { activityRouter } from './modules/activity.js';
+import { activityRouter, listActivity } from './modules/activity.js';
 import { teamsRouter, listTeams } from './modules/teams.js';
 import { projectsRouter, listProjects } from './modules/projects.js';
 import { feedbacksRouter, listFeedbacks, setFeedbackStatus, assignFeedbackTeam } from './modules/feedbacks.js';
-import { paymentsRouter } from './modules/payments.js';
-import { documentsRouter } from './modules/documents.js';
-import { usersRouter, seedAdmin, makeLimiter, findUserByToken, touchLastUsed, bearer, DEV_NO_AUTH } from './modules/users.js';
+import { paymentsRouter, listPayments } from './modules/payments.js';
+import { documentsRouter, listDocuments } from './modules/documents.js';
+import { usersRouter, listProjectMembers, seedAdmin, makeLimiter, findUserByToken, touchLastUsed, bearer, DEV_NO_AUTH } from './modules/users.js';
 import type { McpInfo } from './types.js';
 
 const { version } = createRequire(import.meta.url)(path.join(ROOT_DIR, 'package.json')) as { version: string };
@@ -96,6 +96,16 @@ const mcpInfo = (): McpInfo => ({
 
 const api = express.Router();
 api.use(txMiddleware); // POST/PUT/PATCH/DELETE: một transaction / request
+// Gộp mọi dữ liệu mà các trang cần vào MỘT request (serverless: 1 lần gọi thay vì 7 lần, mỗi lần có thể cold start)
+api.get(
+  '/bootstrap',
+  route(async (req, res) => {
+    const [projects, teams, feedbacks, activity, paymentRounds, members, documents] = await Promise.all([
+      listProjects(), listTeams(), listFeedbacks(), listActivity(), listPayments(), listProjectMembers(), listDocuments(),
+    ]);
+    res.json({ projects, teams, feedbacks, activity, paymentRounds, members, documents });
+  })
+);
 api.get('/mcp-info', (req, res) => void res.json(mcpInfo()));
 for (const router of [projectsRouter, teamsRouter, feedbacksRouter, paymentsRouter, documentsRouter, activityRouter, usersRouter]) api.use(router);
 api.use((req, res) => void res.status(404).json({ error: 'Không có API này.' }));

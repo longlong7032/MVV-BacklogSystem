@@ -356,14 +356,13 @@ usersRouter.delete(
   })
 );
 
-usersRouter.get(
-  '/project-members',
-  route(async (req, res) => {
-    const rows = await q(`SELECT u.id_public, u.name, u.role, t.id_public AS team_pid FROM ${USER_FROM} WHERE u.deleted_at IS NULL AND u.active ORDER BY u.name`);
-    const list: ProjectMember[] = rows.map((r) => ({ idPublic: r.id_public, name: r.name, teamId: r.team_pid || '', role: r.role }));
-    res.json(list);
-  })
-);
+/** Nhân sự đang hoạt động (không có email / thông tin xác thực) để phân công. */
+export async function listProjectMembers(): Promise<ProjectMember[]> {
+  const rows = await q(`SELECT u.id_public, u.name, u.role, t.id_public AS team_pid FROM ${USER_FROM} WHERE u.deleted_at IS NULL AND u.active ORDER BY u.name`);
+  return rows.map((r) => ({ idPublic: r.id_public, name: r.name, teamId: r.team_pid || '', role: r.role }));
+}
+
+usersRouter.get('/project-members', route(async (req, res) => void res.json(await listProjectMembers())));
 
 usersRouter.get(
   '/users',

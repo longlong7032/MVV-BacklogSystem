@@ -95,7 +95,7 @@ export function initUsers(): void {
 }
 
 /** Form đăng nhập quản trị (hiện khi chưa đăng nhập) và nút Đăng xuất (hiện khi đã đăng nhập). */
-function initLogin(): void {
+export function initLogin(): void {
   const form = maybe<HTMLFormElement>('[data-login]');
   if (form) {
     const passwordFields = $('#loginPasswordFields');
@@ -128,7 +128,9 @@ function initLogin(): void {
       submit.disabled = true;
       try {
         await api('/api/admin/login', jsonBody('POST', body)); // server đặt cookie phiên
-        location.reload();
+        // Trang /login: quay về trang đang xem dở (data-next); trang khác: tải lại
+        if (form.dataset.next) location.assign(form.dataset.next);
+        else location.reload();
       } catch (err) {
         setError(errorBox, errorMessage(err));
         submit.disabled = false;

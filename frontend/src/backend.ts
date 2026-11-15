@@ -81,19 +81,11 @@ export async function backendGet<T>(req: Request, path: string): Promise<Backend
   return { status: res.status, ok: res.ok, body };
 }
 
-/** Lấy dự án, team, backlog; ném lỗi nếu backend trả lỗi. */
+/** Lấy dự án, team, backlog, ...: MỘT request `/api/bootstrap`; ném lỗi nếu backend trả lỗi. */
 export async function loadData(req: Request): Promise<Data> {
-  const [projects, teams, feedbacks, activity, paymentRounds, members, documents] = await Promise.all([
-    backendGet<Project[]>(req, '/api/projects'),
-    backendGet<Team[]>(req, '/api/teams'),
-    backendGet<Feedback[]>(req, '/api/feedbacks'),
-    backendGet<ActivityEntry[]>(req, '/api/activity'),
-    backendGet<PaymentRound[]>(req, '/api/payments'),
-    backendGet<ProjectMember[]>(req, '/api/project-members'),
-    backendGet<ProjectDocument[]>(req, '/api/documents'),
-  ]);
-  for (const r of [projects, teams, feedbacks, activity, paymentRounds, members, documents]) if (!r.ok) throw new Error(`backend trả HTTP ${r.status}: ${r.body.error ?? ''}`);
-  return { projects: projects.body, teams: teams.body, feedbacks: feedbacks.body, activity: activity.body, paymentRounds: paymentRounds.body, members: members.body, documents: documents.body };
+  const r = await backendGet<Data>(req, '/api/bootstrap');
+  if (!r.ok) throw new Error(`backend trả HTTP ${r.status}: ${r.body.error ?? ''}`);
+  return r.body;
 }
 
 /**
@@ -101,11 +93,8 @@ export async function loadData(req: Request): Promise<Data> {
  * 503 `admin-setup` = chưa có admin; 401/403/429 = chưa đăng nhập; 200 = đã đăng nhập.
  */
 export async function loadUsers(req: Request): Promise<UsersData> {
-  const users = await backendGet<PublicUser[]>(req, '/api/users');
-  if (users.ok) {
-    const audit = await backendGet<AuditEntry[]>(req, '/api/users/audit');
-    return { state: 'ok', users: users.body, audit: audit.ok ? audit.body : [] };
-  }
+  const [users, audit] = await Promise.all([backendGet<PublicUser[]>(req, '/api/users'), backendGet<AuditEntry[]>(req, '/api/users/audit')]);
+  if (users.ok) return { state: 'ok', users: users.body, audit: audit.ok ? audit.body : [] };
   if (users.body.code === 'admin-setup') return { state: 'disabled', users: [], audit: [] };
   return { state: 'locked', users: [], audit: [] };
 }

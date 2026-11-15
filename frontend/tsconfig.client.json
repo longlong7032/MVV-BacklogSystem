@@ -16,5 +16,5 @@
     "rootDir": "src/client",
     "outDir": "public/js"
   },
-  "include": ["src/client/app.ts", "src/types.d.ts"]
+  "include": ["src/client/app.ts", "src/client/login.ts", "src/types.d.ts"]
 }

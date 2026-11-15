@@ -29,30 +29,28 @@ export async function recordActivity(e: ActivityInput): Promise<void> {
 
 export const activityRouter = Router();
 
-activityRouter.get(
-  '/activity',
-  route(async (req, res) => {
-    const project = uuidParam(req.query.project);
-    const rows = await q(
-      `SELECT a.id_public, a.created_at, a.updated_at, p.id_public AS project_pid, a.entity_type, a.entity_public_id,
-              a.entity_title, a.action, a.actor, a.details
-       FROM activity_logs a LEFT JOIN projects p ON p.id_private = a.project_id
-       WHERE a.deleted_at IS NULL AND ($1::uuid IS NULL OR p.id_public = $1::uuid)
-       ORDER BY a.created_at DESC LIMIT 300`,
-      [project || null]
-    );
-    const list: ActivityEntry[] = rows.map((r) => ({
-      idPublic: r.id_public,
-      createdAt: isoReq(r.created_at),
-      updatedAt: isoReq(r.updated_at),
-      projectId: r.project_pid || '',
-      entityType: r.entity_type,
-      entityId: r.entity_public_id || '',
-      entityTitle: r.entity_title,
-      action: r.action,
-      actor: r.actor,
-      details: Array.isArray(r.details) ? r.details : [],
-    }));
-    res.json(list);
-  })
-);
+/** Nhật ký hoạt động mới nhất (tối đa 300), có thể lọc theo dự án (id công khai). */
+export async function listActivity(project = ''): Promise<ActivityEntry[]> {
+  const rows = await q(
+    `SELECT a.id_public, a.created_at, a.updated_at, p.id_public AS project_pid, a.entity_type, a.entity_public_id,
+            a.entity_title, a.action, a.actor, a.details
+     FROM activity_logs a LEFT JOIN projects p ON p.id_private = a.project_id
+     WHERE a.deleted_at IS NULL AND ($1::uuid IS NULL OR p.id_public = $1::uuid)
+     ORDER BY a.created_at DESC LIMIT 300`,
+    [project || null]
+  );
+  return rows.map((r) => ({
+    idPublic: r.id_public,
+    createdAt: isoReq(r.created_at),
+    updatedAt: isoReq(r.updated_at),
+    projectId: r.project_pid || '',
+    entityType: r.entity_type,
+    entityId: r.entity_public_id || '',
+    entityTitle: r.entity_title,
+    action: r.action,
+    actor: r.actor,
+    details: Array.isArray(r.details) ? r.details : [],
+  }));
+}
+
+activityRouter.get('/activity', route(async (req, res) => void res.json(await listActivity(uuidParam(req.query.project)))));
