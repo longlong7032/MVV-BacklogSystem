@@ -874,7 +874,11 @@ export function registerPages(app: Express, deps: PagesDeps): void {
       }
     };
 
-  app.get('/', (_req, res) => res.redirect('/dashboard'));
+  // Vào site: chưa đăng nhập -> /login, đã đăng nhập -> /dashboard (backend lỗi vẫn về /dashboard để hiện trang lỗi rõ ràng)
+  app.get('/', async (req, res) => {
+    const profile = await deps.loadProfile(req).catch(() => ({}));
+    res.redirect(profile ? '/dashboard' : '/login');
+  });
   // Đường dẫn cũ của màn hình mẫu
   app.get('/project', (_req, res) => res.redirect('/projects'));
   app.get('/preview', (req, res) => {
@@ -904,7 +908,7 @@ export function registerPages(app: Express, deps: PagesDeps): void {
     try {
       const u = await deps.loadUsers(req);
       const nextRaw = qstr(req.query.next);
-      const next_ = /^\/(?![/\\])/.test(nextRaw) ? nextRaw : '/users';
+      const next_ = /^\/(?![/\\])/.test(nextRaw) ? nextRaw : '/dashboard';
       if (u.state === 'ok') return void res.redirect(next_);
       res.render('login', { layout: false, title: 'Đăng nhập', version: deps.version, state: u.state, next: next_ });
     } catch (e) {
