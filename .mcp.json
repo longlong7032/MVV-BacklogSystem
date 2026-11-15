@@ -2,7 +2,10 @@
   "mcpServers": {
     "feedback-backlog": {
       "type": "http",
-      "url": "http://localhost:3000/mcp"
+      "url": "https://mvv-backlog-system.vercel.app/mcp",
+      "headers": {
+        "Authorization": "Bearer ${BACKLOG_MCP_TOKEN}"
+      }
     }
   }
 }

@@ -50,7 +50,7 @@
               <p class="break-words font-medium">{{name}}</p>
               <p class="break-all text-base-content/70">{{email}}</p>
             </td>
-            <td><span class="badge {{roleClass}}">{{roleLabel}}</span></td>
+            <td><span class="badge whitespace-nowrap {{roleClass}}">{{roleLabel}}</span></td>
             <td>{{#if teamName}}{{teamName}}{{else}}{{> dash}}{{/if}}</td>
             <td>
               {{#if hasToken}}<code class="kbd kbd-sm">{{tokenHint}}</code>{{else}}{{> dash}}{{/if}}
