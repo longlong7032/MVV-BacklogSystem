@@ -108,7 +108,14 @@
             <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-base-200 text-xs font-semibold" aria-hidden="true">{{initial}}</span>
             <span class="min-w-0"><span class="block truncate text-sm font-medium">{{name}}</span><span class="block truncate text-xs text-base-content/60">{{teamName}}</span></span>
           </span>
-          <span class="shrink-0 text-xs text-base-content/70"><b class="text-base-content">{{workCount}}</b> đang mở · {{doneCount}} xong</span>
+          <span class="flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-1">
+            <span class="text-xs text-base-content/70"><b class="text-base-content">{{workCount}}</b> đang mở · {{doneCount}} xong</span>
+            {{#if canIssueToken}}
+            {{#if hasToken}}<code class="kbd kbd-sm" title="Token MCP của dự án này{{#if tokenLastUsedAt}} · dùng lần cuối {{timeAgo tokenLastUsedAt}}{{else}} · chưa dùng{{/if}}">{{tokenHint}}</code>{{/if}}
+            <button type="button" data-ptoken="issue" data-project="{{@root.project.idPublic}}" data-user="{{idPublic}}" data-name="{{name}}" data-has-token="{{hasToken}}" class="btn btn-ghost btn-xs whitespace-nowrap">{{#if hasToken}}Cấp lại token{{else}}Cấp token{{/if}}</button>
+            {{#if hasToken}}<button type="button" data-ptoken="revoke" data-project="{{@root.project.idPublic}}" data-user="{{idPublic}}" data-name="{{name}}" class="btn btn-ghost btn-xs whitespace-nowrap text-error">Thu hồi</button>{{/if}}
+            {{/if}}
+          </span>
         </li>
         {{/each}}
       </ul>
@@ -208,6 +215,33 @@
   {{/if}}
 </section>
 {{#if (eq section "backlog")}}{{> modal_backlog backlog}}{{/if}}
+{{#if canManageTokens}}
+<!-- Token MCP theo dự án (hiện một lần) -->
+<div id="projectTokenModal" data-modal data-modal-sticky class="modal" role="dialog" aria-modal="true">
+  <div class="modal-box w-full max-w-2xl p-0">
+    <div class="border-b border-base-content/10 px-5 py-4">
+      <h2 class="text-base font-semibold">Token của <span data-ptoken-user></span> · dự án <span data-ptoken-project></span></h2>
+    </div>
+    <div class="space-y-4 px-5 py-5 text-sm text-base-content/70">
+      <p role="alert" class="alert alert-warning py-2 text-sm"><b>Sao chép ngay.</b> Token chỉ hiển thị một lần, chỉ xem được backlog của dự án này. Gửi riêng cho đúng người, không đăng vào chat chung hay commit vào repo.</p>
+      <div class="join w-full">
+        <code id="ptokenValue" class="input input-bordered input-sm join-item flex h-auto min-h-8 min-w-0 flex-1 items-center break-all bg-base-200 py-1"></code>
+        <button type="button" data-copy-target="#ptokenValue" class="btn btn-sm join-item">Sao chép</button>
+      </div>
+      <div>
+        <p class="mb-1 text-sm font-medium uppercase tracking-wide text-base-content/70">Lệnh kết nối Claude Code</p>
+        <div class="relative">
+          <button type="button" data-copy-target="#ptokenCmd" class="btn btn-xs absolute right-2 top-2">Sao chép</button>
+          <pre class="overflow-x-auto rounded-btn bg-neutral p-4 pr-24 text-sm leading-relaxed text-neutral-content"><code id="ptokenCmd"></code></pre>
+        </div>
+      </div>
+    </div>
+    <div class="flex justify-end border-t border-base-content/10 bg-base-200 px-5 py-3">
+      <button type="button" data-ptoken-done class="btn btn-primary btn-sm">Tôi đã lưu token</button>
+    </div>
+  </div>
+</div>
+{{/if}}
 {{> modal_project}}
 <div id="paymentModal" data-modal class="modal" role="dialog" aria-modal="true">
   <form id="paymentForm" class="modal-box w-full max-w-xl p-0" enctype="multipart/form-data" novalidate>

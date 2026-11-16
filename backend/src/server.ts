@@ -17,7 +17,7 @@ import { ROOT_DIR } from './lib/paths.js';
 import { HttpError, route } from './lib/http.js';
 import { blobMode, readFile } from './lib/blobs.js';
 import { MAX_REQUEST_BYTES } from './lib/upload.js';
-import { tx, txMiddleware } from './db/pool.js';
+import { q1, tx, txMiddleware } from './db/pool.js';
 import { runMigrations } from './db/migrate.js';
 import { createMcpServer } from './mcp/server.js';
 import type { Backend } from './mcp/server.js';
@@ -27,6 +27,7 @@ import { projectsRouter, listProjects } from './modules/projects.js';
 import { feedbacksRouter, listFeedbacks, setFeedbackStatus, assignFeedbackTeam } from './modules/feedbacks.js';
 import { paymentsRouter, listPayments } from './modules/payments.js';
 import { documentsRouter, listDocuments } from './modules/documents.js';
+import { projectTokensRouter, findProjectToken, touchProjectToken } from './modules/project-tokens.js';
 import { usersRouter, listProjectMembers, makeLimiter, findUserByToken, touchLastUsed, bearer, DEV_NO_AUTH } from './modules/users.js';
 import type { McpInfo } from './types.js';
 
@@ -106,7 +107,7 @@ api.get(
   })
 );
 api.get('/mcp-info', (req, res) => void res.json(mcpInfo()));
-for (const router of [projectsRouter, teamsRouter, feedbacksRouter, paymentsRouter, documentsRouter, activityRouter, usersRouter]) api.use(router);
+for (const router of [projectsRouter, teamsRouter, feedbacksRouter, paymentsRouter, documentsRouter, activityRouter, usersRouter, projectTokensRouter]) api.use(router);
 api.use((req, res) => void res.status(404).json({ error: 'Không có API này.' }));
 app.use('/api', api);
 
@@ -122,10 +123,19 @@ const MCP_REQUEST_TIMEOUT = 60 * 1000;
 let mcpActive = 0;
 
 /** Nguồn dữ liệu cho MCP: gọi thẳng các module (ghi trong transaction riêng). */
-const directBackend = (actor: string): Backend => ({
+const directBackend = (actor: string, scope: string[] | null): Backend => {
+  const allowed = (projectPublicId: string): boolean => scope === null || scope.includes(projectPublicId);
+  /** Chặn đổi backlog ngoài phạm vi token (kể cả khi biết id). */
+  const guard = async (feedbackPublicId: string): Promise<void> => {
+    if (scope === null) return;
+    const row = await q1<{ pid: string }>('SELECT p.id_public AS pid FROM feedbacks f JOIN projects p ON p.id_private = f.project_id WHERE f.id_public = $1::uuid AND f.deleted_at IS NULL', [feedbackPublicId]).catch(() => null);
+    if (!row || !allowed(row.pid)) throw new Error('Không tìm thấy backlog (hoặc token này không có quyền với dự án của backlog).');
+  };
+  return {
   async loadAll() {
     const [projects, teams, feedbacks] = await Promise.all([listProjects(), listTeams(), listFeedbacks()]);
-    return { projects, teams, feedbacks };
+    // Token theo dự án / người dùng thường: chỉ thấy dự án được cấp (scope = null: admin, thấy tất cả)
+    return scope === null ? { projects, teams, feedbacks } : { projects: projects.filter((p) => allowed(p.idPublic)), teams, feedbacks: feedbacks.filter((f) => allowed(f.projectId)) };
   },
   async fetchFile(url, maxBytes) {
     const file = await readFile(path.basename(String(url)));
@@ -133,9 +143,10 @@ const directBackend = (actor: string): Backend => ({
     if (file.buffer.length > maxBytes) throw new Error(`file quá lớn (> ${Math.round(maxBytes / 1048576)}MB)`);
     return file;
   },
-  setStatus: (id, status) => tx(() => setFeedbackStatus(id, status, actor || 'MCP', true)),
-  assignTeam: (id, teamId) => tx(() => assignFeedbackTeam(id, teamId, actor || 'MCP', true)),
-});
+  setStatus: async (id, status) => (await guard(id), tx(() => setFeedbackStatus(id, status, actor || 'MCP', true))),
+  assignTeam: async (id, teamId) => (await guard(id), tx(() => assignFeedbackTeam(id, teamId, actor || 'MCP', true))),
+  };
+};
 
 const rpcError = (res: Response, code: number, message: string): Response => res.status(code).json({ jsonrpc: '2.0', error: { code: -32000, message }, id: null });
 const tooMany = (res: Response, seconds: number): Response => {
@@ -154,8 +165,11 @@ app.post(
 
     let actor = 'local';
     let canWrite = true;
+    let scope: string[] | null = null; // null = xem mọi dự án; còn lại = danh sách id dự án được xem
     if (!DEV_NO_AUTH) {
-      const user = await findUserByToken(bearer(req));
+      const credential = bearer(req);
+      const projectToken = await findProjectToken(credential);
+      const user = projectToken ? projectToken.actor : await findUserByToken(credential);
       if (!user) {
         mcpBadAuth.hit(ip);
         res.setHeader('WWW-Authenticate', 'Bearer');
@@ -164,7 +178,10 @@ app.post(
       if (!user.active) return void rpcError(res, 403, 'Tài khoản đã bị vô hiệu hóa. Liên hệ quản trị viên.');
       actor = user.name;
       canWrite = user.role === 'write' || user.role === 'admin';
-      await touchLastUsed(user.idPrivate);
+      // Token dự án chỉ xem đúng dự án đó; token cá nhân của admin xem tất cả; của người dùng thường chưa gán dự án thì không xem được gì
+      scope = projectToken ? [projectToken.projectPublicId] : user.role === 'admin' ? null : [];
+      if (projectToken) await touchProjectToken(projectToken.tokenId);
+      else await touchLastUsed(user.idPrivate);
     }
     if (MCP_READONLY) canWrite = false;
 
@@ -183,7 +200,7 @@ app.post(
       res.end();
     });
     try {
-      const server = createMcpServer({ backend: directBackend(actor), publicBase: process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`, canWrite });
+      const server = createMcpServer({ backend: directBackend(actor, scope), publicBase: process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`, canWrite });
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined }); // stateless
       res.on('close', () => {
         release();

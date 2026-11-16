@@ -111,7 +111,7 @@ const toPublicUser = (r: Record<string, any>): PublicUser => ({
   lastUsedAt: iso(r.last_used_at),
 });
 
-const toActor = (r: Record<string, any>): Actor => ({ idPrivate: r.id_private, idPublic: r.id_public, name: r.name, role: r.role, active: r.active });
+export const toActor = (r: Record<string, any>): Actor => ({ idPrivate: r.id_private, idPublic: r.id_public, name: r.name, role: r.role, active: r.active });
 
 /** Người dùng theo token cá nhân (so khớp băm SHA-256 qua index); không có -> null. */
 export async function findUserByToken(token: string): Promise<Actor | null> {

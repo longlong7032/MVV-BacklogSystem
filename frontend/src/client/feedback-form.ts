@@ -363,7 +363,7 @@ export function initFeedbackForm(): void {
       return;
     }
     if (!f.title.value.trim() && !f.bugText.value.trim()) {
-      setError(errorBox, 'Nhập tên lỗi hoặc mô tả lỗi.');
+      setError(errorBox, 'Nhập tên công việc hoặc mô tả lỗi.');
       f.title.focus();
       return;
     }

@@ -222,4 +222,20 @@ CREATE INDEX audit_logs_created_idx ON audit_logs (created_at DESC);
 ${TABLES.map(touch).join('\n')}
 `,
   },
+  {
+    id: '002_project_tokens',
+    sql: `
+-- Token MCP theo dự án: cấp cho một nhân sự trong dự án, chỉ xem được backlog của đúng dự án đó
+CREATE TABLE project_tokens (${STD},
+  project_id       BIGINT NOT NULL REFERENCES projects (id_private),
+  user_id          BIGINT NOT NULL REFERENCES users (id_private),
+  token_hash       TEXT NOT NULL,
+  token_hint       TEXT NOT NULL DEFAULT '',
+  last_used_at     TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX project_tokens_hash_uq ON project_tokens (token_hash) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX project_tokens_member_uq ON project_tokens (project_id, user_id) WHERE deleted_at IS NULL;
+${touch('project_tokens')}
+`,
+  },
 ];

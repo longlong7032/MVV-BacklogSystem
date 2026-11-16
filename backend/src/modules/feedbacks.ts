@@ -8,7 +8,7 @@
  *   PATCH  /api/feedbacks/:id/team        { team_id }
  *   DELETE /api/feedbacks/:id             xóa mềm
  *   GET    /api/export                    ?project&team&type&status&q  -> file .xlsx
- *   GET    /api/public/backlog            ?project&team&type&status&q  -> danh sách rút gọn cho người vãng lai (ẩn id, HAR)
+ *   GET    /api/public/backlog            ?project(bắt buộc)&team&type&status&q  -> danh sách rút gọn của MỘT dự án cho người vãng lai (ẩn id, HAR)
  */
 import { Router } from 'express';
 import type { Request } from 'express';
@@ -153,7 +153,7 @@ async function readForm(req: Request, fallbackStatus: FeedbackStatus) {
   }
   const title = str(b.title);
   const type = str(b.type);
-  if (title.length > 200) bad('Tên lỗi tối đa 200 ký tự.');
+  if (title.length > 200) bad('Tên công việc tối đa 200 ký tự.');
   if (type.length > 60) bad('Loại tối đa 60 ký tự.');
   return {
     projectId: projectId as number,
@@ -302,7 +302,7 @@ feedbacksRouter.delete(
 /* ---------- Danh sách công khai (người dùng vãng lai) ---------- */
 
 /**
- * GET /api/public/backlog?project&team&type&status&q
+ * GET /api/public/backlog?project=<idPublic dự án, bắt buộc>&team&type&status&q
  * Chỉ trả các cột an toàn: STT, tên dự án, tiêu đề, loại, team, trạng thái, có ảnh hay không.
  * KHÔNG trả id, mô tả lỗi, URL, ghi chú, link ảnh hay file HAR.
  */
@@ -310,11 +310,14 @@ feedbacksRouter.get(
   '/public/backlog',
   route(async (req, res) => {
     const project = uuidParam(req.query.project);
+    if (!project) bad('Thiếu dự án: dùng ?project=<id dự án>.');
+    const proj = await q1<{ name: string }>('SELECT name FROM projects WHERE id_public = $1::uuid AND deleted_at IS NULL', [project]);
+    if (!proj) notFound('Không tìm thấy dự án.');
     const teamFilter = str(req.query.team);
     const typeFilter = str(req.query.type);
     const status = str(req.query.status);
     const needle = str(req.query.q).toLowerCase();
-    const rows = await q(`${SELECT} WHERE f.deleted_at IS NULL AND p.deleted_at IS NULL AND ($1::uuid IS NULL OR p.id_public = $1::uuid) ORDER BY p.name, f.stt`, [project || null]);
+    const rows = await q(`${SELECT} WHERE f.deleted_at IS NULL AND p.deleted_at IS NULL AND p.id_public = $1::uuid ORDER BY f.stt`, [project]);
     const meta = new Map(rows.map((r) => [r.id_public, r]));
     const items = (await toFeedbacks(rows))
       .filter((f) => !status || f.status === status)
@@ -335,7 +338,7 @@ feedbacksRouter.get(
         hasImage: Boolean(f.location.image || f.bug.images.length || f.expected.images.length),
       }));
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ total: items.length, items });
+    res.json({ project: proj!.name, total: items.length, items });
   })
 );
 
@@ -372,7 +375,7 @@ feedbacksRouter.get(
       { header: 'Team xử lý', key: 'team', width: 20 },
       { header: 'Người xử lý', key: 'assignee', width: 20 },
       { header: 'Trạng thái', key: 'status', width: 16 },
-      { header: 'Tên lỗi', key: 'title', width: 34 },
+      { header: 'Tên công việc', key: 'title', width: 34 },
       { header: 'Vị trí lỗi (URL)', key: 'url', width: 36 },
       { header: 'Ảnh vị trí lỗi', key: 'locImg', width: 30 },
       { header: 'Mô tả lỗi', key: 'bug', width: 50 },

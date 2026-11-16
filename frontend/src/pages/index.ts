@@ -8,7 +8,7 @@
  */
 import type { Express, NextFunction, Request, Response } from 'express';
 import { renderError } from './errors.js';
-import type { PublicBacklogItem } from '../backend.js';
+import type { ProjectTokenInfo, PublicBacklogItem } from '../backend.js';
 import type { ActivityEntry, AuditEntry, Feedback, FeedbackStatus, McpInfo, PaymentRound, Profile, Project, ProjectDocument, ProjectMember, PublicUser, Team } from '../types.js';
 import { DOC_STATUSES, DOC_STATUS_KEYS, STATUSES, STATUS_KEYS, TONES, byName, countByStatus, fmtSize, isHttp, makeProgress, money, optionItems, qs, qstr } from './util.js';
 
@@ -42,8 +42,10 @@ export interface PagesDeps {
   loadMcpInfo: (req: Request) => Promise<McpInfo>;
   /** Hồ sơ người đang đăng nhập (null = chưa đăng nhập). */
   loadProfile: (req: Request) => Promise<Profile | null>;
+  /** Token MCP theo dự án (admin mới xem được). */
+  loadProjectTokens: (req: Request, projectId: string) => Promise<{ admin: boolean; tokens: ProjectTokenInfo[] }>;
   /** Danh sách backlog rút gọn cho người vãng lai (không cần đăng nhập). */
-  loadPublicBacklog: (req: Request) => Promise<{ total: number; items: PublicBacklogItem[] }>;
+  loadPublicBacklog: (req: Request) => Promise<{ project: string; total: number; items: PublicBacklogItem[] }>;
 }
 
 /** Địa chỉ gốc của web app, dùng dựng URL MCP: PUBLIC_URL hoặc theo request. */
@@ -358,7 +360,8 @@ function backlogModel(req: Request, db: Data, scope?: BacklogScope) {
       nextHref: page < pages ? href({ page: page + 1 }) : '',
     },
     exportHref: `/api/export${qs({ project: fProject, status, team: fTeam, type: fType, q })}`,
-    publicHref: `/view/backlog${qs({ project: fProject, status, team: fTeam, type: fType, q })}`,
+    // Trang xem công khai luôn theo MỘT dự án: chỉ có link khi đang xem một dự án cụ thể
+    publicHref: fProject ? `/view/backlog${qs({ project: fProject, status, team: fTeam, type: fType, q })}` : '',
     // Dữ liệu cho form thêm / sửa (modal) — server render sẵn mọi lựa chọn
     form: {
       projects: optionItems(
@@ -404,6 +407,21 @@ function projectsModel(req: Request, db: Data) {
       const counts = countByStatus(items);
       const overdue = Boolean(p.deadline && p.deadline < today && items.some((item) => item.status !== 'done'));
       return { ...p, initial: (p.code || p.name).slice(0, 1).toUpperCase(), overdue, deadlineLabel: p.deadline ? new Date(`${p.deadline}T00:00:00`).toLocaleDateString('vi-VN') : 'Chưa đặt deadline', memberCount: p.memberIds.length, item: p, detailHref: `/projects/${encodeURIComponent(p.idPublic)}`, backlogHref: `/backlog${qs({ project: p.idPublic })}`, total: items.length, todo: counts.todo, doing: counts.doing, done: counts.done, progress: makeProgress(counts, items.length) };
+    }),
+  };
+}
+
+/** Gắn thông tin token dự án vào danh sách nhân sự (chỉ nhân sự đang tham gia dự án mới cấp được token). */
+function withProjectTokens(model: ReturnType<typeof projectWorkspaceModel>, pt: { admin: boolean; tokens: ProjectTokenInfo[] }) {
+  if (!('projectMembers' in model) || !model.project) return model;
+  const byUser = new Map(pt.tokens.map((t) => [t.userId, t]));
+  const joined = new Set(model.project.memberIds);
+  return {
+    ...model,
+    canManageTokens: pt.admin,
+    projectMembers: model.projectMembers.map((m) => {
+      const t = byUser.get(m.idPublic);
+      return { ...m, canIssueToken: pt.admin && joined.has(m.idPublic), hasToken: Boolean(t), tokenHint: t?.tokenHint ?? '', tokenLastUsedAt: t?.lastUsedAt ?? '' };
     }),
   };
 }
@@ -892,7 +910,16 @@ export function registerPages(app: Express, deps: PagesDeps): void {
   app.get('/dashboard', page('dashboard', 'dashboard', 'Tổng quan', deps.loadData, (req, db) => dashboardModel(db)));
   app.get('/backlog', page('backlog', 'backlog', 'Backlog', deps.loadData, backlogModel));
   app.get('/projects', page('projects', 'projects', 'Dự án', deps.loadData, projectsModel));
-  app.get('/projects/:id', page('project-workspace', 'projects', 'Không gian dự án', deps.loadData, projectWorkspaceModel));
+  app.get(
+    '/projects/:id',
+    page(
+      'project-workspace',
+      'projects',
+      'Không gian dự án',
+      async (req) => ({ db: await deps.loadData(req), pt: await deps.loadProjectTokens(req, String(req.params.id)) }),
+      (req, d) => withProjectTokens(projectWorkspaceModel(req, d.db), d.pt)
+    )
+  );
   app.get('/teams', page('teams', 'teams', 'Team xử lý', deps.loadData, teamsModel));
   app.get('/requirements', page('requirements', 'requirements', 'Tài liệu PTYC', deps.loadData, (req, db) => documentsModel(req, db)));
   app.get('/payments', page('payments', 'payments', 'Thanh toán', deps.loadData, paymentsModel));
@@ -932,7 +959,8 @@ export function registerPages(app: Express, deps: PagesDeps): void {
   );
   // Trang xem công khai cho người vãng lai: chỉ đọc, không có id / HAR / mô tả lỗi, không cần đăng nhập
   app.get('/view/backlog', async (req, res, next) => {
-    let data: { total: number; items: PublicBacklogItem[] };
+    if (!qstr(req.query.project)) return renderError(res, 404, { heading: 'Thiếu dự án', message: 'Trang xem công khai chỉ hiển thị backlog của từng dự án.', hint: 'Dùng đúng đường dẫn được chia sẻ cho dự án của bạn.' });
+    let data: { project: string; total: number; items: PublicBacklogItem[] };
     try {
       data = await deps.loadPublicBacklog(req);
     } catch (e) {
@@ -942,7 +970,7 @@ export function registerPages(app: Express, deps: PagesDeps): void {
     try {
       const rows = data.items.map((i) => ({ ...i, statusBadge: STATUSES[i.status as FeedbackStatus]?.badge ?? 'badge-ghost' }));
       res.setHeader('X-Robots-Tag', 'noindex');
-      res.render('public-backlog', { layout: false, title: 'Danh sách backlog', version: deps.version, total: data.total, rows, today: new Date().toISOString() });
+      res.render('public-backlog', { layout: false, title: data.project, projectName: data.project, version: deps.version, total: data.total, rows, today: new Date().toISOString() });
     } catch (e) {
       next(e);
     }

@@ -29,7 +29,7 @@
     {{#if board}}<input type="hidden" name="mode" value="board">{{/if}}
     <label class="input input-bordered input-sm col-span-2 flex min-w-0 flex-1 basis-64 items-center gap-2">
       <svg class="h-4 w-4 shrink-0 opacity-60" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clip-rule="evenodd"/></svg>
-      <input id="filterQuery" name="q" value="{{filters.q}}" type="search" placeholder="Tìm tên lỗi, mô tả, ghi chú… (Enter)" autocomplete="off" class="min-w-0 grow" aria-label="Tìm kiếm backlog">
+      <input id="filterQuery" name="q" value="{{filters.q}}" type="search" placeholder="Tìm tên công việc, mô tả, ghi chú… (Enter)" autocomplete="off" class="min-w-0 grow" aria-label="Tìm kiếm backlog">
     </label>
     {{#unless scoped}}
     <select name="project" data-autosubmit class="select select-bordered select-sm w-full min-w-0 sm:w-auto sm:max-w-[14rem]" aria-label="Dự án">{{> options options=projectOptions}}</select>

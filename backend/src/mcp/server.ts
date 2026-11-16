@@ -309,7 +309,7 @@ function createMcpServer({ backend, publicBase, canWrite = true }: McpServerOpti
         type: z.string().max(60).optional().describe('Loại, vd "App customer", "Website admin"; "none" = chưa phân loại'),
         team: z.string().max(200).optional().describe('Tên hoặc id team; "none" = chưa phân công'),
         status: STATUS.optional().describe('todo | doing | done'),
-        query: z.string().max(200).optional().describe('Từ khóa tìm trong tên lỗi / mô tả lỗi / kết quả mong muốn / ghi chú / URL'),
+        query: z.string().max(200).optional().describe('Từ khóa tìm trong tên công việc / mô tả lỗi / kết quả mong muốn / ghi chú / URL'),
         limit: z.number().int().min(1).max(200).default(50).describe('Số lượng tối đa (mặc định 50)'),
       },
     },
@@ -348,7 +348,7 @@ function createMcpServer({ backend, publicBase, canWrite = true }: McpServerOpti
     'get_backlog',
     {
       description:
-        'Lấy chi tiết đầy đủ một backlog: mã + tên dự án, loại, team, tên lỗi, vị trí lỗi, mô tả lỗi, kết quả mong muốn, ghi chú, link ảnh, file HAR. ' +
+        'Lấy chi tiết đầy đủ một backlog: mã + tên dự án, loại, team, tên công việc, vị trí lỗi, mô tả lỗi, kết quả mong muốn, ghi chú, link ảnh, file HAR. ' +
         'Đặt include_images=true để nhận luôn ảnh (hiển thị được cho model). Chỉ định bằng id, hoặc project + stt.',
       inputSchema: {
         id: z.string().max(64).optional().describe('Id backlog (đủ hoặc tiền tố duy nhất)'),

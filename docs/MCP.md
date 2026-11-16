@@ -9,11 +9,24 @@ Hướng dẫn cho dev dùng công cụ AI (Claude Code, Cursor, VS Code, Claude
 
 > `/mcp` là endpoint JSON-RPC (được frontend proxy sang backend). Trang hướng dẫn nằm ở `/mcp-guide`.
 
-## Bước 1. Lấy token cá nhân
+## Bước 1. Lấy token theo dự án
 
-1. Nhờ quản trị viên tạo tài khoản cho bạn ở trang **Người dùng** (`/users`) và chọn quyền: chỉ đọc, đọc + ghi, hoặc quản trị.
-2. Quản trị viên bấm cấp token. Token có dạng `fbk_...` và **chỉ hiện một lần**, vì hệ thống chỉ lưu bản băm.
-3. Mất token thì nhờ quản trị viên cấp lại. Token cũ mất hiệu lực ngay.
+Token được cấp **theo từng dự án** và chỉ xem được backlog của dự án đó.
+
+1. Quản trị viên tạo tài khoản cho bạn ở trang **Người dùng** (`/users`) và chọn quyền: chỉ đọc hoặc đọc + ghi.
+2. Quản trị viên vào dự án, thêm bạn vào **Nhân sự** của dự án (nút "Chọn nhân sự").
+3. Cũng trong khung Nhân sự của dự án, quản trị viên bấm **Cấp token** cạnh tên bạn rồi gửi riêng token cho bạn. Token có dạng `fbk_...` và **chỉ hiện một lần**, vì hệ thống chỉ lưu bản băm.
+4. Mất token thì nhờ quản trị viên **Cấp lại token** (token cũ mất hiệu lực ngay). Muốn ngừng quyền thì **Thu hồi**, hoặc bỏ bạn khỏi Nhân sự của dự án, token sẽ hết hiệu lực.
+
+Phạm vi của từng loại token:
+
+| Loại token | Xem được |
+| --- | --- |
+| Token dự án (cấp ở tab Nhân sự) | Chỉ dự án được cấp |
+| Token cá nhân của quản trị viên (trang Người dùng) | Tất cả dự án |
+| Token cá nhân của người dùng thường (trang Người dùng) | Không xem được dự án nào, hãy dùng token dự án |
+
+Cần nhiều dự án thì được cấp mỗi dự án một token và thêm nhiều server MCP (đặt tên khác nhau).
 
 Tự tạo token cho admin đầu tiên (chạy trên máy có `DATABASE_URL`):
 
