@@ -36,7 +36,7 @@ npm run dev:frontend
 
 Mở http://localhost:4000. Chạy bản build: `npm run start:backend` và `npm run start:frontend`. Kiểm tra kiểu: `npm run typecheck`.
 
-- Giao diện là các file `frontend/views/*.hbs` + `views/partials/*.hbs`: sửa rồi tải lại trang là thấy. Sửa `frontend/src/client/*.ts` thì chạy lại `npm --prefix frontend run build:client`.
+- Giao diện là các file `frontend/views/*.hbs` + `views/partials/*.hbs`: sửa rồi tải lại trang là thấy. Sửa `frontend/src/client/*.ts` thì chạy lại `npm --prefix frontend run build:client`. CSS Tailwind được build sẵn ra `frontend/public/css/app.css` (`npm --prefix frontend run build:css`; `npm run dev` / `build` đã gọi sẵn) — thêm class Tailwind mới trong views / `src/**/*.ts` thì build lại.
 - Mỗi project cũng chạy độc lập: `cd backend && npm run dev`, `cd frontend && npm run dev`.
 - Schema tự migrate khi backend khởi động (hoặc chạy tay `npm --prefix backend run db:migrate`). Xóa sạch dữ liệu local: `docker compose down -v`.
 - Tạo admin bằng dòng lệnh: `npm --prefix backend run create-admin -- "Họ tên" email@congty.vn "mật-khẩu"` (không có mật khẩu thì in token một lần). Tài khoản lưu trong DB; đăng nhập ở `/login`, đổi mật khẩu ở `/profile`.
@@ -143,7 +143,7 @@ claude mcp add --transport http feedback-backlog https://<host>/mcp --header "Au
 | Đọc + ghi | + đổi trạng thái, giao team | — |
 | Quản trị viên | như Đọc + ghi | Quản lý người dùng, cấp / thu hồi token |
 
-Quản trị viên đăng nhập trang Người dùng bằng **email + mật khẩu** (admin cứng đặt trong `.env`, xem bên dưới) hoặc bằng **token cá nhân**. Ngoài ra có thể tạo admin bằng lệnh chạy trên server:
+Quản trị viên đăng nhập trang Người dùng bằng **email + mật khẩu** (admin cứng đặt trong `.env`, xem bên dưới). Ngoài ra có thể tạo admin bằng lệnh chạy trên server:
 
 ```bash
 npm --prefix backend run create-admin -- "Họ tên" email@congty.vn "mật-khẩu"   # có mật khẩu: đặt mật khẩu đăng nhập; bỏ mật khẩu: in token một lần. Chạy lại với email cũ = cập nhật

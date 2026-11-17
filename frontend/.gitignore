@@ -4,3 +4,4 @@ dist
 .env.*
 # Sinh ra từ src/client/*.ts (npm run build:client)
 public/js/
+public/css/

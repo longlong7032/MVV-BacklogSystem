@@ -7,6 +7,7 @@
  *   PATCH  /api/feedbacks/:id/status      { status }
  *   PATCH  /api/feedbacks/:id/team        { team_id }
  *   DELETE /api/feedbacks/:id             xóa mềm
+ *   GET    /api/backlog                   ?project&team&type&status&q&sort&page&pageSize&mode=board -> lọc / sắp xếp / phân trang trong SQL
  *   GET    /api/export                    ?project&team&type&status&q  -> file .xlsx
  *   GET    /api/public/backlog            ?project(bắt buộc)&team&type&status&q  -> danh sách rút gọn của MỘT dự án cho người vãng lai (ẩn id, HAR)
  */
@@ -80,6 +81,138 @@ export async function listFeedbacks(projectPublicId = ''): Promise<Feedback[]> {
     [projectPublicId || null]
   );
   return toFeedbacks(rows);
+}
+
+/* ---------- Danh sách có lọc + phân trang (làm trong SQL) ---------- */
+
+/** Bộ lọc backlog. `team` / `type` = 'none' nghĩa là "chưa có". Chuỗi rỗng = không lọc. */
+export interface BacklogFilter {
+  project: string;
+  team: string;
+  type: string;
+  status: '' | FeedbackStatus;
+  q: string;
+}
+
+const SORT_SQL: Record<string, string> = {
+  project: 'p.name, f.stt',
+  newest: 'f.created_at DESC, f.id_private DESC',
+  updated: 'f.updated_at DESC, f.id_private DESC',
+};
+
+/** Các cột được tìm theo từ khóa (khớp phía giao diện: nhãn dự án, loại, team, tên, URL, mô tả lỗi, mong muốn, ghi chú). */
+const SEARCH_COLUMNS = [
+  "CASE WHEN p.code <> '' THEN p.code || ' - ' || p.name ELSE p.name END",
+  'f.type',
+  "COALESCE(t.name, '')",
+  'f.title',
+  'f.location_url',
+  'f.bug_text',
+  'f.expected_text',
+  'f.note',
+];
+
+/** Điều kiện WHERE (dùng alias f / p / t như SELECT) + tham số. `withStatus=false` để đếm số lượng mỗi trạng thái. */
+function backlogWhere(f: BacklogFilter, withStatus: boolean): { sql: string; params: unknown[] } {
+  const params: unknown[] = [];
+  const bind = (v: unknown): string => (params.push(v), `$${params.length}`);
+  const c = ['f.deleted_at IS NULL', 'p.deleted_at IS NULL'];
+  if (f.project) c.push(`p.id_public::text = ${bind(f.project)}`);
+  if (f.team) c.push(f.team === 'none' ? 't.id_public IS NULL' : `t.id_public::text = ${bind(f.team)}`);
+  if (f.type) c.push(f.type === 'none' ? "f.type = ''" : `lower(f.type) = ${bind(f.type.toLowerCase())}`);
+  if (withStatus && f.status) c.push(`f.status = ${bind(f.status)}`);
+  if (f.q) {
+    const n = bind(f.q.toLowerCase()); // strpos: so khớp chuỗi con thuần, không coi % _ là ký tự đặc biệt
+    c.push(`(${SEARCH_COLUMNS.map((col) => `strpos(lower(${col}), ${n}) > 0`).join(' OR ')})`);
+  }
+  return { sql: c.join(' AND '), params };
+}
+
+const COUNT_FROM = `FROM feedbacks f JOIN projects p ON p.id_private = f.project_id
+  LEFT JOIN teams t ON t.id_private = f.team_id AND t.deleted_at IS NULL`;
+
+export interface BacklogPage {
+  items: Feedback[];
+  /** Tổng số mục khớp bộ lọc (kể cả bộ lọc trạng thái). */
+  total: number;
+  /** Số mục theo từng trạng thái, khi áp mọi bộ lọc TRỪ trạng thái. */
+  counts: Record<FeedbackStatus, number>;
+  page: number;
+  pages: number;
+  pageSize: number;
+}
+
+export interface BacklogBoard {
+  columns: Record<FeedbackStatus, { total: number; items: Feedback[] }>;
+  counts: Record<FeedbackStatus, number>;
+  limit: number;
+}
+
+/** Số thẻ tối đa mỗi cột Kanban (phần còn lại xem ở chế độ bảng). */
+export const BOARD_LIMIT = 50;
+
+async function countByStatus(f: BacklogFilter): Promise<Record<FeedbackStatus, number>> {
+  const w = backlogWhere(f, false);
+  const rows = await q<{ status: FeedbackStatus; n: number }>(`SELECT f.status, count(*) AS n ${COUNT_FROM} WHERE ${w.sql} GROUP BY f.status`, w.params);
+  const counts: Record<FeedbackStatus, number> = { todo: 0, doing: 0, done: 0 };
+  for (const r of rows) counts[r.status] = Number(r.n);
+  return counts;
+}
+
+async function selectBacklog(f: BacklogFilter, sort: string, limit: number, offset: number): Promise<Feedback[]> {
+  const w = backlogWhere(f, true);
+  const n = w.params.length;
+  const rows = await q(`${SELECT} WHERE ${w.sql} ORDER BY ${SORT_SQL[sort] ?? SORT_SQL.project} LIMIT $${n + 1} OFFSET $${n + 2}`, [...w.params, limit, offset]);
+  return toFeedbacks(rows);
+}
+
+/** Một trang backlog (chế độ bảng). `page` vượt quá số trang thì lấy trang cuối. */
+export async function listBacklogPage(f: BacklogFilter, sort: string, page: number, pageSize: number): Promise<BacklogPage> {
+  const counts = await countByStatus(f);
+  const total = f.status ? counts[f.status] : counts.todo + counts.doing + counts.done;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const cur = Math.min(Math.max(1, page), pages);
+  const items = total ? await selectBacklog(f, sort, pageSize, (cur - 1) * pageSize) : [];
+  return { items, total, counts, page: cur, pages, pageSize };
+}
+
+/** Kanban: mỗi cột tối đa BOARD_LIMIT thẻ. Có lọc trạng thái thì chỉ cột đó có thẻ. */
+export async function listBacklogBoard(f: BacklogFilter, sort: string): Promise<BacklogBoard> {
+  const counts = await countByStatus(f);
+  const keys: FeedbackStatus[] = ['todo', 'doing', 'done'];
+  const lists = await Promise.all(keys.map((k) => ((f.status && f.status !== k) || !counts[k] ? Promise.resolve([] as Feedback[]) : selectBacklog({ ...f, status: k }, sort, BOARD_LIMIT, 0))));
+  const columns = {} as BacklogBoard['columns'];
+  keys.forEach((k, i) => (columns[k] = { total: f.status && f.status !== k ? 0 : counts[k], items: lists[i]! }));
+  return { columns, counts, limit: BOARD_LIMIT };
+}
+
+/** Thống kê gộp: số backlog theo (dự án, team, người xử lý, trạng thái) + STT kế tiếp mỗi dự án + các "loại" đang dùng. */
+export interface BacklogStats {
+  groups: { projectId: string; teamId: string; assigneeId: string; status: FeedbackStatus; count: number }[];
+  nextStt: Record<string, number>;
+  types: string[];
+}
+
+export async function getBacklogStats(): Promise<BacklogStats> {
+  const [rows, types] = await Promise.all([
+    q(
+      `SELECT p.id_public AS project_pid, t.id_public AS team_pid, u.id_public AS assignee_pid, f.status, count(*) AS n, max(f.stt) AS max_stt
+       FROM feedbacks f JOIN projects p ON p.id_private = f.project_id
+       LEFT JOIN teams t ON t.id_private = f.team_id AND t.deleted_at IS NULL
+       LEFT JOIN users u ON u.id_private = f.assignee_id AND u.deleted_at IS NULL AND u.active
+       WHERE f.deleted_at IS NULL AND p.deleted_at IS NULL
+       GROUP BY p.id_public, t.id_public, u.id_public, f.status`
+    ),
+    q<{ type: string }>("SELECT DISTINCT f.type FROM feedbacks f JOIN projects p ON p.id_private = f.project_id WHERE f.deleted_at IS NULL AND p.deleted_at IS NULL AND f.type <> ''"),
+  ]);
+  const nextStt: Record<string, number> = {};
+  for (const r of rows) nextStt[r.project_pid] = Math.max(nextStt[r.project_pid] ?? 0, Number(r.max_stt));
+  for (const k of Object.keys(nextStt)) nextStt[k]! += 1;
+  return {
+    groups: rows.map((r) => ({ projectId: r.project_pid, teamId: r.team_pid || '', assigneeId: r.assignee_pid || '', status: r.status, count: Number(r.n) })),
+    nextStt,
+    types: types.map((r) => r.type),
+  };
 }
 
 export async function loadFeedback(id: number): Promise<Feedback> {
@@ -296,6 +429,38 @@ feedbacksRouter.delete(
     await q('UPDATE feedback_attachments SET deleted_at = now() WHERE feedback_id = $1 AND deleted_at IS NULL', [id]);
     await recordActivity({ projectId: row.project_id, entityType: 'backlog', entityPublicId: row.id_public, entityTitle: row.title || `Backlog #${row.stt}`, action: 'deleted', actor: 'Thành viên', details: ['Xóa backlog'] });
     res.json({ ok: true });
+  })
+);
+
+/** Danh sách backlog đã lọc / sắp xếp / phân trang ngay trong SQL (xem listBacklogPage / listBacklogBoard). */
+feedbacksRouter.get(
+  '/backlog',
+  route(async (req, res) => {
+    const status = str(req.query.status);
+    const f: BacklogFilter = {
+      project: uuidParam(req.query.project),
+      team: str(req.query.team) === 'none' ? 'none' : uuidParam(req.query.team),
+      type: str(req.query.type).slice(0, 60),
+      status: isStatus(status) ? status : '',
+      q: str(req.query.q).slice(0, 200),
+    };
+    // Id sai định dạng = không khớp gì (khác với bỏ trống = không lọc)
+    const badId = (raw: unknown, parsed: string): boolean => str(raw) !== '' && str(raw) !== 'none' && !parsed;
+    const nothing = badId(req.query.project, f.project) || badId(req.query.team, f.team);
+    const sort = str(req.query.sort) in SORT_SQL ? str(req.query.sort) : 'project';
+    res.setHeader('Cache-Control', 'no-store');
+    if (nothing) {
+      const zero = { todo: 0, doing: 0, done: 0 };
+      return void res.json(
+        req.query.mode === 'board'
+          ? { columns: { todo: { total: 0, items: [] }, doing: { total: 0, items: [] }, done: { total: 0, items: [] } }, counts: zero, limit: BOARD_LIMIT }
+          : { items: [], total: 0, counts: zero, page: 1, pages: 1, pageSize: 20 }
+      );
+    }
+    if (req.query.mode === 'board') return void res.json(await listBacklogBoard(f, sort));
+    const pageSize = Math.min(100, Math.max(1, Math.floor(Number(req.query.pageSize)) || 20));
+    const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+    res.json(await listBacklogPage(f, sort, page, pageSize));
   })
 );
 

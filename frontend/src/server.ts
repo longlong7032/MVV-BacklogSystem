@@ -21,6 +21,7 @@ import {
   FRONTEND_MARK_HEADER,
   SELF_TARGET_ERROR,
   backendErrorFor,
+  loadBacklog,
   loadData,
   loadMcpInfo,
   loadProfile,
@@ -107,7 +108,7 @@ app.use('/public', express.static(path.join(ROOT_DIR, 'public'), IS_PROD ? { max
 
 /* ---------- Các trang ---------- */
 app.locals.version = version; // layout.hbs hiển thị phiên bản ở mọi trang (kể cả trang lỗi)
-registerPages(app, { version, loadData, loadUsers, loadMcpInfo, loadProfile, loadPublicBacklog, loadProjectTokens });
+registerPages(app, { version, loadData, loadBacklog, loadUsers, loadMcpInfo, loadProfile, loadPublicBacklog, loadProjectTokens });
 registerErrorHandlers(app); // 404 + lỗi bất ngờ: phải đặt sau mọi route
 
 // Cấu hình backend sai: báo ngay khi khởi động (trên Vercel hiện trong Function Logs)

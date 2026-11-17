@@ -8,9 +8,10 @@
  */
 import type { Express, NextFunction, Request, Response } from 'express';
 import { renderError } from './errors.js';
-import type { ProjectTokenInfo, PublicBacklogItem } from '../backend.js';
+import type { BacklogData, BacklogQuery, DataPart, ProjectTokenInfo, PublicBacklogItem } from '../backend.js';
 import type { ActivityEntry, AuditEntry, Feedback, FeedbackStatus, McpInfo, PaymentRound, Profile, Project, ProjectDocument, ProjectMember, PublicUser, Team } from '../types.js';
-import { DOC_STATUSES, DOC_STATUS_KEYS, STATUSES, STATUS_KEYS, TONES, byName, countByStatus, fmtSize, isHttp, makeProgress, money, optionItems, qs, qstr } from './util.js';
+import { DOC_STATUSES, DOC_STATUS_KEYS, STATUSES, STATUS_KEYS, TONES, byName, fmtSize, isHttp, makeProgress, money, optionItems, qs, qstr, tally } from './util.js';
+import type { Stats } from './util.js';
 
 /** Dữ liệu dùng chung của các trang, lấy từ backend. */
 export interface Data {
@@ -21,6 +22,8 @@ export interface Data {
   paymentRounds: PaymentRound[];
   members: ProjectMember[];
   documents: ProjectDocument[];
+  /** Thống kê backlog gộp sẵn (đếm theo dự án / team / người / trạng thái, STT kế tiếp, các loại). */
+  stats: Stats;
 }
 
 /** Dữ liệu trang Người dùng: trạng thái đăng nhập quản trị và (nếu đã đăng nhập) danh sách. */
@@ -35,7 +38,9 @@ export interface UsersData {
 export interface PagesDeps {
   version: string;
   /** Lấy dự án, team, backlog từ backend. */
-  loadData: (req: Request) => Promise<Data>;
+  loadData: (req: Request, parts?: DataPart[], project?: string) => Promise<Data>;
+  /** Một trang backlog đã lọc / sắp xếp / phân trang trong SQL. */
+  loadBacklog: (req: Request, query: BacklogQuery) => Promise<BacklogData>;
   /** Lấy người dùng + nhật ký từ backend (kèm cookie đăng nhập của request). */
   loadUsers: (req: Request) => Promise<UsersData>;
   /** Thông tin cấu hình MCP / xác thực từ backend. */
@@ -55,9 +60,9 @@ const baseUrl = (req: Request): string => (process.env.PUBLIC_URL || `${req.prot
 const projectLabel = (p: Project | undefined): string => (p ? (p.code ? `${p.code} - ${p.name}` : p.name) : '(không rõ)');
 
 /** Danh sách loại: mặc định + các loại đã dùng (không phân biệt hoa thường), sắp xếp theo tên. */
-const typeList = (items: Feedback[]): string[] => {
+const typeList = (used: string[]): string[] => {
   const seen = new Map<string, string>();
-  for (const t of ['App customer', 'Website admin', ...items.map((f) => f.type)].filter(Boolean)) {
+  for (const t of ['App customer', 'Website admin', ...used].filter(Boolean)) {
     if (!seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t);
   }
   return [...seen.values()].sort((a, b) => a.localeCompare(b, 'vi'));
@@ -69,31 +74,22 @@ const PAGE_SIZE = 20;
 /* ---------- Dashboard ---------- */
 
 /** Một dòng "khối lượng công việc" (theo team hoặc dự án) kèm thanh tiến độ. */
-const loadRow = (name: string, items: Feedback[], href: string) => {
-  const counts = countByStatus(items);
-  return { name, href, total: items.length, todo: counts.todo, doing: counts.doing, progress: makeProgress(counts, items.length) };
-};
+const loadRow = (name: string, t: ReturnType<typeof tally>, href: string) => ({
+  name,
+  href,
+  total: t.total,
+  todo: t.counts.todo,
+  doing: t.counts.doing,
+  progress: makeProgress(t.counts, t.total),
+});
 
 function dashboardModel(db: Data) {
-  const counts = countByStatus(db.feedbacks);
-  const total = db.feedbacks.length;
-  const unassigned = db.feedbacks.filter((f) => !f.teamId && f.status !== 'done').length;
-  const teamRows = byName(db.teams).map((t) =>
-    loadRow(
-      t.name,
-      db.feedbacks.filter((f) => f.teamId === t.idPublic),
-      `/backlog${qs({ team: t.idPublic })}`
-    )
-  );
-  const none = db.feedbacks.filter((f) => !f.teamId);
-  if (none.length) teamRows.push(loadRow('Chưa phân công', none, `/backlog${qs({ team: 'none' })}`));
-  const projectRows = byName(db.projects).map((p) =>
-    loadRow(
-      projectLabel(p),
-      db.feedbacks.filter((f) => f.projectId === p.idPublic),
-      `/backlog${qs({ project: p.idPublic })}`
-    )
-  );
+  const { counts, total } = tally(db.stats);
+  const unassigned = tally(db.stats, (g) => !g.teamId && g.status !== 'done').total;
+  const teamRows = byName(db.teams).map((t) => loadRow(t.name, tally(db.stats, (g) => g.teamId === t.idPublic), `/backlog${qs({ team: t.idPublic })}`));
+  const none = tally(db.stats, (g) => !g.teamId);
+  if (none.total) teamRows.push(loadRow('Chưa phân công', none, `/backlog${qs({ team: 'none' })}`));
+  const projectRows = byName(db.projects).map((p) => loadRow(projectLabel(p), tally(db.stats, (g) => g.projectId === p.idPublic), `/backlog${qs({ project: p.idPublic })}`));
   return {
     cards: [
       { label: 'Tổng backlog', value: total, sub: `${db.projects.length} dự án · ${db.teams.length} team`, accent: TONES.primary.dot },
@@ -113,12 +109,8 @@ function dashboardModel(db: Data) {
 
 /* ---------- Backlog ---------- */
 
-/** Các kiểu sắp xếp. */
-const SORTERS: Record<string, (a: Feedback, b: Feedback, name: (id: string) => string) => number> = {
-  project: (a, b, name) => name(a.projectId).localeCompare(name(b.projectId), 'vi') || a.stt - b.stt,
-  newest: (a, b) => b.createdAt.localeCompare(a.createdAt),
-  updated: (a, b) => b.updatedAt.localeCompare(a.updatedAt),
-};
+/** Các kiểu sắp xếp (thực hiện trong SQL ở backend, xem SORT_SQL). */
+const SORT_KEYS = ['project', 'newest', 'updated'];
 
 /**
  * Phạm vi hiển thị danh sách backlog nằm trong trang khác (vd tab Backlog của trang dự án):
@@ -130,47 +122,74 @@ export interface BacklogScope {
   fixedParams: Record<string, string>;
 }
 
-function backlogModel(req: Request, db: Data, scope?: BacklogScope) {
-  const project = scope ? scope.projectId : qstr(req.query.project);
-  const type = qstr(req.query.type);
-  const team = qstr(req.query.team);
-  const q = qstr(req.query.q);
-  const status = (STATUS_KEYS as string[]).includes(qstr(req.query.status)) ? (qstr(req.query.status) as FeedbackStatus) : '';
-  const sort = qstr(req.query.sort) in SORTERS ? qstr(req.query.sort) : 'project';
-  const mode = qstr(req.query.mode) === 'board' ? 'board' : 'list';
+/** Bộ lọc backlog đọc từ query string (chưa kiểm tra có tồn tại không). */
+interface BacklogFilters {
+  project: string;
+  type: string;
+  team: string;
+  q: string;
+  status: FeedbackStatus | '';
+  sort: string;
+  mode: 'list' | 'board';
+  page: number;
+}
+
+function rawBacklogFilters(req: Request, scope?: BacklogScope): BacklogFilters {
+  const status = qstr(req.query.status);
+  const sort = qstr(req.query.sort);
+  return {
+    project: scope ? scope.projectId : qstr(req.query.project),
+    type: qstr(req.query.type),
+    team: qstr(req.query.team),
+    q: qstr(req.query.q),
+    status: (STATUS_KEYS as string[]).includes(status) ? (status as FeedbackStatus) : '',
+    sort: SORT_KEYS.includes(sort) ? sort : 'project',
+    mode: qstr(req.query.mode) === 'board' ? 'board' : 'list',
+    page: Math.max(1, Math.floor(Number(qstr(req.query.page))) || 1),
+  };
+}
+
+/** Bỏ bộ lọc trỏ tới mục không còn tồn tại (dự án / team / loại). */
+function cleanBacklogFilters(f: BacklogFilters, db: Data): BacklogFilters {
+  const types = typeList(db.stats.types);
+  return {
+    ...f,
+    project: f.project && db.projects.some((p) => p.idPublic === f.project) ? f.project : '',
+    team: f.team === 'none' || (f.team && db.teams.some((t) => t.idPublic === f.team)) ? f.team : '',
+    type: f.type === 'none' || types.some((t) => t.toLowerCase() === f.type.toLowerCase()) ? f.type : '',
+  };
+}
+
+const toBacklogQuery = (f: BacklogFilters): BacklogQuery => ({
+  project: f.project,
+  team: f.team,
+  type: f.type,
+  status: f.status,
+  q: f.q,
+  sort: f.sort,
+  page: f.page,
+  pageSize: PAGE_SIZE,
+  mode: f.mode === 'board' ? 'board' : '',
+});
+
+/**
+ * Lấy danh sách backlog cho trang: dữ liệu chung và trang backlog được tải SONG SONG; chỉ khi bộ lọc trỏ tới mục
+ * không tồn tại (hiếm) mới tải lại với bộ lọc đã bỏ mục đó.
+ */
+async function fetchBacklog(deps: PagesDeps, req: Request, dbPromise: Promise<Data>, scope?: BacklogScope): Promise<{ db: Data; bl: BacklogData }> {
+  const raw = rawBacklogFilters(req, scope);
+  const [db, first] = await Promise.all([dbPromise, deps.loadBacklog(req, toBacklogQuery(raw))]);
+  const clean = cleanBacklogFilters(raw, db);
+  const changed = clean.project !== raw.project || clean.team !== raw.team || clean.type !== raw.type;
+  return { db, bl: changed ? await deps.loadBacklog(req, toBacklogQuery(clean)) : first };
+}
+
+function backlogModel(req: Request, db: Data, bl: BacklogData, scope?: BacklogScope) {
+  const { project: fProject, team: fTeam, type: fType, q, status, sort, mode } = cleanBacklogFilters(rawBacklogFilters(req, scope), db);
   const projectById = (id: string) => db.projects.find((p) => p.idPublic === id);
   const teamById = (id: string) => db.teams.find((t) => t.idPublic === id);
-  const types = typeList(db.feedbacks);
-
-  // Bỏ bộ lọc trỏ tới mục không còn tồn tại
-  const fProject = project && projectById(project) ? project : '';
-  const fTeam = team === 'none' || (team && teamById(team)) ? team : '';
-  const fType = type === 'none' || types.some((t) => t.toLowerCase() === type.toLowerCase()) ? type : '';
-
-  // Lọc theo dự án + team + loại + từ khóa (chưa lọc trạng thái, để đếm số lượng mỗi trạng thái)
-  const needle = q.toLowerCase();
-  const base = db.feedbacks
-    .filter((f) => !fProject || f.projectId === fProject)
-    .filter((f) => !fTeam || (fTeam === 'none' ? !f.teamId : f.teamId === fTeam))
-    .filter((f) => !fType || (fType === 'none' ? !f.type : f.type.toLowerCase() === fType.toLowerCase()))
-    .filter(
-      (f) =>
-        !needle ||
-        [
-          projectLabel(projectById(f.projectId)),
-          f.type,
-          teamById(f.teamId)?.name,
-          f.title,
-          f.location.url,
-          f.bug.text,
-          f.expected.text,
-          f.note,
-        ].some((s) =>
-          String(s || '')
-            .toLowerCase()
-            .includes(needle)
-        )
-    );
+  const types = typeList(db.stats.types);
+  const totals = tally(db.stats);
 
   const current = {
     project: scope ? '' : fProject, // trong phạm vi dự án, dự án đã nằm trong basePath
@@ -186,7 +205,8 @@ function backlogModel(req: Request, db: Data, scope?: BacklogScope) {
   const href = (over: Record<string, string | number | undefined> = {}): string => `${basePath}${qs({ ...scope?.fixedParams, ...current, ...over })}`;
 
   // Thẻ thống kê kiêm bộ lọc trạng thái
-  const counts = countByStatus(base);
+  const counts = bl.counts;
+  const baseTotal = counts.todo + counts.doing + counts.done;
   const card = (key: string, label: string, count: number, dot: string, progress: string) => ({
     key,
     label,
@@ -194,24 +214,23 @@ function backlogModel(req: Request, db: Data, scope?: BacklogScope) {
     dot,
     progress,
     active: status === key,
-    pct: base.length ? Math.round((count / base.length) * 100) : 0,
+    pct: baseTotal ? Math.round((count / baseTotal) * 100) : 0,
     href: href({ status: key, page: undefined }),
   });
   const tabs = [
-    card('', 'Tất cả', base.length, TONES.primary.dot, TONES.primary.progress),
+    card('', 'Tất cả', baseTotal, TONES.primary.dot, TONES.primary.progress),
     ...STATUS_KEYS.map((k) => card(k, STATUSES[k].label, counts[k], STATUSES[k].dot, STATUSES[k].progress)),
   ];
 
-  // Danh sách sau khi lọc trạng thái + sắp xếp + phân trang
-  const projectName = (id: string): string => projectById(id)?.name ?? '';
-  const sorter = SORTERS[sort] as (typeof SORTERS)[string];
-  const list = base.filter((f) => !status || f.status === status).sort((a, b) => sorter(a, b, projectName));
-  const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
-  const page = Math.min(Math.max(1, Number(qstr(req.query.page)) || 1), pages);
+  // Danh sách đã lọc + sắp xếp + phân trang ngay trong SQL (bl)
+  const board = mode === 'board' ? bl.columns : undefined;
+  const resultCount = board ? STATUS_KEYS.reduce((n, k) => n + board[k].total, 0) : bl.total;
+  const pages = bl.pages;
+  const curPage = bl.page;
 
   let empty = 'Chưa có backlog nào. Chọn "Thêm backlog" để ghi nhận lỗi đầu tiên.';
   if (!db.projects.length) empty = 'Chưa có dự án nào. Hãy tạo dự án ở tab "Dự án" trước khi thêm backlog.';
-  else if (db.feedbacks.length) empty = 'Không có backlog nào khớp với bộ lọc.';
+  else if (totals.total) empty = 'Không có backlog nào khớp với bộ lọc.';
 
   /** Dữ liệu chung cho dòng bảng / thẻ Kanban. */
   const rowContext = (f: Feedback) => {
@@ -280,8 +299,8 @@ function backlogModel(req: Request, db: Data, scope?: BacklogScope) {
   };
 
   const columns = STATUS_KEYS.map((k) => {
-    const col = list.filter((f) => f.status === k);
-    return { key: k, dot: STATUSES[k].dot, label: STATUSES[k].label, count: col.length, cards: col.map(rowContext) };
+    const col = board?.[k] ?? { total: 0, items: [] };
+    return { key: k, dot: STATUSES[k].dot, label: STATUSES[k].label, count: col.total, cards: col.items.map(rowContext), more: Math.max(0, col.total - col.items.length) };
   });
 
   // Chip bộ lọc đang áp dụng (bấm × để bỏ)
@@ -344,20 +363,20 @@ function backlogModel(req: Request, db: Data, scope?: BacklogScope) {
       { label: 'Kanban', active: mode === 'board', href: href({ mode: 'board', page: undefined }) },
     ],
     board: mode === 'board',
-    rows: list.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map(rowContext),
+    rows: board ? [] : bl.items.map(rowContext),
     columns,
     empty,
-    resultCount: list.length,
+    resultCount,
     pager: {
       show: mode !== 'board' && pages > 1,
       board: mode === 'board',
-      total: list.length,
-      from: (page - 1) * PAGE_SIZE + 1,
-      to: Math.min(list.length, page * PAGE_SIZE),
-      page,
+      total: resultCount,
+      from: (curPage - 1) * bl.pageSize + 1,
+      to: Math.min(resultCount, curPage * bl.pageSize),
+      page: curPage,
       pages,
-      prevHref: page > 1 ? href({ page: page - 1 }) : '',
-      nextHref: page < pages ? href({ page: page + 1 }) : '',
+      prevHref: curPage > 1 ? href({ page: curPage - 1 }) : '',
+      nextHref: curPage < pages ? href({ page: curPage + 1 }) : '',
     },
     exportHref: `/api/export${qs({ project: fProject, status, team: fTeam, type: fType, q })}`,
     // Trang xem công khai luôn theo MỘT dự án: chỉ có link khi đang xem một dự án cụ thể
@@ -374,11 +393,7 @@ function backlogModel(req: Request, db: Data, scope?: BacklogScope) {
       types,
       statuses: STATUS_KEYS.map((k) => ({ key: k, label: STATUSES[k].label })),
       /** STT kế tiếp của từng dự án, để gợi ý trên form. */
-      nextStt: JSON.stringify(
-        Object.fromEntries(
-          db.projects.map((p) => [p.idPublic, db.feedbacks.filter((f) => f.projectId === p.idPublic).reduce((m, f) => Math.max(m, f.stt), 0) + 1])
-        )
-      ),
+      nextStt: JSON.stringify(Object.fromEntries(db.projects.map((p) => [p.idPublic, db.stats.nextStt[p.idPublic] ?? 1]))),
       defaultType: '',
       /** Dự án theo id (kèm vai trò) — "Loại" của backlog được chọn trong vai trò của dự án đang chọn. */
       projectsJson: JSON.stringify(Object.fromEntries(db.projects.map((p) => [p.idPublic, p]))),
@@ -403,10 +418,9 @@ function projectsModel(req: Request, db: Data) {
     summary: `${db.projects.length} dự án`,
     empty: db.projects.length ? 'Không có dự án nào khớp.' : 'Chưa có dự án nào. Chọn "Thêm dự án" để bắt đầu.',
     rows: list.map((p) => {
-      const items = db.feedbacks.filter((f) => f.projectId === p.idPublic);
-      const counts = countByStatus(items);
-      const overdue = Boolean(p.deadline && p.deadline < today && items.some((item) => item.status !== 'done'));
-      return { ...p, initial: (p.code || p.name).slice(0, 1).toUpperCase(), overdue, deadlineLabel: p.deadline ? new Date(`${p.deadline}T00:00:00`).toLocaleDateString('vi-VN') : 'Chưa đặt deadline', memberCount: p.memberIds.length, item: p, detailHref: `/projects/${encodeURIComponent(p.idPublic)}`, backlogHref: `/backlog${qs({ project: p.idPublic })}`, total: items.length, todo: counts.todo, doing: counts.doing, done: counts.done, progress: makeProgress(counts, items.length) };
+      const { counts, total } = tally(db.stats, (g) => g.projectId === p.idPublic);
+      const overdue = Boolean(p.deadline && p.deadline < today && counts.todo + counts.doing > 0);
+      return { ...p, initial: (p.code || p.name).slice(0, 1).toUpperCase(), overdue, deadlineLabel: p.deadline ? new Date(`${p.deadline}T00:00:00`).toLocaleDateString('vi-VN') : 'Chưa đặt deadline', memberCount: p.memberIds.length, item: p, detailHref: `/projects/${encodeURIComponent(p.idPublic)}`, backlogHref: `/backlog${qs({ project: p.idPublic })}`, total, todo: counts.todo, doing: counts.doing, done: counts.done, progress: makeProgress(counts, total) };
     }),
   };
 }
@@ -426,27 +440,29 @@ function withProjectTokens(model: ReturnType<typeof projectWorkspaceModel>, pt: 
   };
 }
 
-function projectWorkspaceModel(req: Request, db: Data) {
+function projectWorkspaceModel(req: Request, db: Data, bl: BacklogData | null) {
   const project = db.projects.find((p) => p.idPublic === req.params.id);
   if (!project) return { missing: true };
-  const tasks = db.feedbacks.filter((f) => f.projectId === project.idPublic).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const mineGroups = db.stats.groups.filter((g) => g.projectId === project.idPublic);
+  const mine = tally({ ...db.stats, groups: mineGroups });
   const payments = db.paymentRounds.filter((payment) => payment.projectId === project.idPublic).sort((a, b) => a.stt - b.stt);
-  const counts = countByStatus(tasks);
+  const counts = mine.counts;
+  const taskTotal = mine.total;
   const paymentTotal = payments.filter((payment) => payment.paid).reduce((sum, payment) => sum + payment.amount, 0);
   const paymentPlannedTotal = payments.reduce((sum, payment) => sum + payment.amount, 0);
   const unpaidPaymentCount = payments.filter((payment) => !payment.paid).length;
   const companyPaidPayments = payments.filter((payment) => payment.paid && payment.companyAccount);
   const openCount = counts.todo + counts.doing;
-  const unassignedCount = tasks.filter((task) => task.status !== 'done' && !task.teamId).length;
-  const unassignedPeopleCount = tasks.filter((task) => task.status !== 'done' && !task.assigneeId).length;
+  const unassignedCount = tally({ ...db.stats, groups: mineGroups }, (g) => g.status !== 'done' && !g.teamId).total;
+  const unassignedPeopleCount = tally({ ...db.stats, groups: mineGroups }, (g) => g.status !== 'done' && !g.assigneeId).total;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const daysToDeadline = project.deadline ? Math.ceil((new Date(`${project.deadline}T00:00:00`).getTime() - today.getTime()) / 86400000) : null;
   const isOverdue = daysToDeadline !== null && daysToDeadline < 0 && openCount > 0;
-  const memberIds = new Set([...project.memberIds, ...tasks.map((task) => task.assigneeId).filter(Boolean)]);
+  const memberIds = new Set([...project.memberIds, ...mineGroups.map((g) => g.assigneeId).filter(Boolean)]);
   const projectMembers = db.members.filter((member) => memberIds.has(member.idPublic)).map((member) => {
-    const assigned = tasks.filter((task) => task.assigneeId === member.idPublic);
-    return { ...member, initial: member.name.slice(0, 1).toUpperCase(), teamName: db.teams.find((team) => team.idPublic === member.teamId)?.name || 'Chưa thuộc team', workCount: assigned.filter((task) => task.status !== 'done').length, doneCount: assigned.filter((task) => task.status === 'done').length };
+    const assigned = tally({ ...db.stats, groups: mineGroups }, (g) => g.assigneeId === member.idPublic);
+    return { ...member, initial: member.name.slice(0, 1).toUpperCase(), teamName: db.teams.find((team) => team.idPublic === member.teamId)?.name || 'Chưa thuộc team', workCount: assigned.counts.todo + assigned.counts.doing, doneCount: assigned.counts.done };
   });
   const section = ['overview', 'payments', 'requirements', 'backlog', 'activity'].includes(qstr(req.query.section)) ? qstr(req.query.section) : 'overview';
   const base = `/projects/${encodeURIComponent(project.idPublic)}`;
@@ -478,7 +494,7 @@ function projectWorkspaceModel(req: Request, db: Data) {
   return {
     title: project.name,
     crumbs: [{ label: 'Dự án', href: '/projects' }, { label: project.name }],
-    project, section, tabs, taskCount: tasks.length, todoCount: counts.todo, doingCount: counts.doing, doneCount: counts.done,
+    project, section, tabs, taskCount: taskTotal, todoCount: counts.todo, doingCount: counts.doing, doneCount: counts.done,
     memberOptions: db.members,
     projectMembers,
     participantCount: projectMembers.length,
@@ -492,11 +508,11 @@ function projectWorkspaceModel(req: Request, db: Data) {
     deadlineLabel: project.deadline ? new Date(`${project.deadline}T00:00:00`).toLocaleDateString('vi-VN') : 'Chưa đặt',
     deadlineState: daysToDeadline === null ? 'Chưa đặt deadline' : daysToDeadline < 0 ? `Quá hạn ${Math.abs(daysToDeadline)} ngày` : daysToDeadline === 0 ? 'Đến hạn hôm nay' : `Còn ${daysToDeadline} ngày`,
     openCount, unassignedCount,
-    projectState: isOverdue ? 'Dự án đang trễ deadline' : openCount || unassignedCount || unpaidPaymentCount ? 'Có việc cần theo dõi' : tasks.length && payments.length ? 'Đang ổn định' : 'Thiếu dữ liệu theo dõi',
+    projectState: isOverdue ? 'Dự án đang trễ deadline' : openCount || unassignedCount || unpaidPaymentCount ? 'Có việc cần theo dõi' : taskTotal && payments.length ? 'Đang ổn định' : 'Thiếu dữ liệu theo dõi',
     hasOpenBacklog: openCount > 0,
     hasUnassignedBacklog: unassignedCount > 0,
     hasOverviewConcern: isOverdue || openCount > 0 || unassignedCount > 0 || unpaidPaymentCount > 0,
-    hasOverviewData: tasks.length > 0 && payments.length > 0,
+    hasOverviewData: taskTotal > 0 && payments.length > 0,
     hasPayments: payments.length > 0,
     payments: payments.map((payment) => ({ ...payment, amountLabel: new Intl.NumberFormat('vi-VN').format(payment.amount), dateLabel: payment.paidAt ? new Date(payment.paidAt).toLocaleDateString('vi-VN') : '—', paidLabel: payment.paid ? 'Đã thanh toán' : 'Chưa thanh toán' })),
     paymentCount: payments.length,
@@ -510,14 +526,13 @@ function projectWorkspaceModel(req: Request, db: Data) {
     projectValueLabel: new Intl.NumberFormat('vi-VN').format(project.totalValue),
     hasCompanyPaidPayments: companyPaidPayments.length > 0,
     hasProjectInvoiceTask: Boolean(project.invoiceFeedbackId),
-    backlogPct: tasks.length ? Math.round((counts.done / tasks.length) * 100) : 0,
+    backlogPct: taskTotal ? Math.round((counts.done / taskTotal) * 100) : 0,
     recentPayments: [...payments].sort((a, b) => b.paidAt.localeCompare(a.paidAt) || b.stt - a.stt).slice(0, 4).map((payment) => ({
       ...payment,
       amountLabel: new Intl.NumberFormat('vi-VN').format(payment.amount),
       dateLabel: payment.paidAt ? new Date(payment.paidAt).toLocaleDateString('vi-VN') : 'Chưa có ngày',
       paidLabel: payment.paid ? 'Đã thanh toán' : 'Chưa thanh toán',
     })),
-    tasks: tasks.slice(0, 8).map((f) => ({ ...f, statusLabel: STATUSES[f.status].label, statusBadge: STATUSES[f.status].badge })),
     activity: db.activity.filter((entry) => entry.projectId === project.idPublic).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 30).map((entry) => ({
       ...entry,
       actionLabel: ({ created: 'Tạo mới', updated: 'Cập nhật', status: 'Đổi trạng thái', assigned: 'Đổi người xử lý', deleted: 'Đã xóa' } as Record<string, string>)[entry.action],
@@ -534,8 +549,8 @@ function projectWorkspaceModel(req: Request, db: Data) {
         ? documentsModel(req, db, { projectId: project.idPublic, basePath: `/projects/${encodeURIComponent(project.idPublic)}`, fixedParams: { section: 'requirements' } })
         : null,
     backlog:
-      section === 'backlog'
-        ? backlogModel(req, db, { projectId: project.idPublic, basePath: `/projects/${encodeURIComponent(project.idPublic)}`, fixedParams: { section: 'backlog' } })
+      section === 'backlog' && bl
+        ? backlogModel(req, db, bl, { projectId: project.idPublic, basePath: `/projects/${encodeURIComponent(project.idPublic)}`, fixedParams: { section: 'backlog' } })
         : null,
     created: new Date(project.createdAt).toLocaleDateString('vi-VN'),
   };
@@ -557,12 +572,12 @@ function teamsModel(req: Request, db: Data) {
     summary: `${db.teams.length} team`,
     empty: db.teams.length ? 'Không có team nào khớp.' : 'Chưa có team nào. Chọn "Thêm team" để bắt đầu.',
     rows: list.map((t) => {
-      const items = db.feedbacks.filter((f) => f.teamId === t.idPublic);
+      const mine = tally(db.stats, (g) => g.teamId === t.idPublic);
       return {
         ...t,
         item: t,
         backlogHref: `/backlog${qs({ team: t.idPublic })}`,
-        progress: makeProgress(countByStatus(items), items.length, 'Chưa được giao backlog'),
+        progress: makeProgress(mine.counts, mine.total, 'Chưa được giao backlog'),
       };
     }),
   };
@@ -819,14 +834,14 @@ const ROLE_NAMES: Record<string, string> = { read: 'Chỉ đọc', write: 'Đọ
 function peopleModel(req: Request, db: Data) {
   const q = qstr(req.query.q);
   const needle = q.toLowerCase();
-  const open = db.feedbacks.filter((f) => f.status !== 'done');
   const rows = db.members
     .filter((m) => !needle || [m.name, db.teams.find((t) => t.idPublic === m.teamId)?.name].some((x) => String(x || '').toLowerCase().includes(needle)))
     .map((m) => {
-      const mine = db.feedbacks.filter((f) => f.assigneeId === m.idPublic);
-      const openCount = mine.filter((f) => f.status !== 'done').length;
-      const doingCount = mine.filter((f) => f.status === 'doing').length;
-      const projects = db.projects.filter((p) => p.memberIds.includes(m.idPublic) || mine.some((f) => f.projectId === p.idPublic));
+      const mineGroups = db.stats.groups.filter((g) => g.assigneeId === m.idPublic);
+      const mine = tally({ ...db.stats, groups: mineGroups });
+      const openCount = mine.counts.todo + mine.counts.doing;
+      const doingCount = mine.counts.doing;
+      const projects = db.projects.filter((p) => p.memberIds.includes(m.idPublic) || mineGroups.some((g) => g.projectId === p.idPublic));
       const load =
         openCount >= 8 ? { label: 'Quá tải', badge: TONES.error.badge }
         : openCount >= 4 ? { label: 'Nhiều việc', badge: TONES.warning.badge }
@@ -840,7 +855,7 @@ function peopleModel(req: Request, db: Data) {
         projects: projects.map((p) => ({ label: projectLabel(p), href: `/projects/${encodeURIComponent(p.idPublic)}` })),
         openCount,
         doingCount,
-        doneCount: mine.length - openCount,
+        doneCount: mine.total - openCount,
         load,
         backlogHref: `/backlog${qs({ q: m.name })}`,
       };
@@ -851,8 +866,8 @@ function peopleModel(req: Request, db: Data) {
     stats: {
       people: db.members.length,
       inProjects: db.members.filter((m) => db.projects.some((p) => p.memberIds.includes(m.idPublic))).length,
-      assignedOpen: open.filter((f) => f.assigneeId).length,
-      unassignedOpen: open.filter((f) => !f.assigneeId).length,
+      assignedOpen: tally(db.stats, (g) => g.status !== 'done' && Boolean(g.assigneeId)).total,
+      unassignedOpen: tally(db.stats, (g) => g.status !== 'done' && !g.assigneeId).total,
     },
     rows,
     empty: db.members.length ? 'Không có nhân sự nào khớp.' : 'Chưa có nhân sự. Thêm người dùng ở trang "Người dùng & token".',
@@ -907,30 +922,50 @@ export function registerPages(app: Express, deps: PagesDeps): void {
     const screen = qstr(req.query.screen);
     res.redirect(['dashboard', 'backlog', 'projects', 'teams', 'requirements', 'payments', 'people'].includes(screen) ? `/${screen}` : '/dashboard');
   });
-  app.get('/dashboard', page('dashboard', 'dashboard', 'Tổng quan', deps.loadData, (req, db) => dashboardModel(db)));
-  app.get('/backlog', page('backlog', 'backlog', 'Backlog', deps.loadData, backlogModel));
-  app.get('/projects', page('projects', 'projects', 'Dự án', deps.loadData, projectsModel));
+  app.get('/dashboard', page('dashboard', 'dashboard', 'Tổng quan', (req) => deps.loadData(req, ['projects', 'teams', 'stats']), (req, db) => dashboardModel(db)));
+  app.get(
+    '/backlog',
+    page('backlog', 'backlog', 'Backlog', (req) => fetchBacklog(deps, req, deps.loadData(req, ['projects', 'teams', 'members', 'stats'])), (req, d) => backlogModel(req, d.db, d.bl))
+  );
+  app.get('/projects', page('projects', 'projects', 'Dự án', (req) => deps.loadData(req, ['projects', 'members', 'stats']), projectsModel));
   app.get(
     '/projects/:id',
     page(
       'project-workspace',
       'projects',
       'Không gian dự án',
-      async (req) => ({ db: await deps.loadData(req), pt: await deps.loadProjectTokens(req, String(req.params.id)) }),
-      (req, d) => withProjectTokens(projectWorkspaceModel(req, d.db), d.pt)
+      async (req) => {
+        const id = String(req.params.id);
+        const section = qstr(req.query.section);
+        // Chỉ tải phần mà tab đang xem cần: nhật ký cho tab Lịch sử, danh sách backlog cho tab Backlog
+        const parts: DataPart[] = ['projects', 'teams', 'members', 'stats', 'paymentRounds', 'documents'];
+        if (section === 'activity') parts.push('activity');
+        const dbPromise = deps.loadData(req, parts, id);
+        // Song song: dữ liệu của dự án + token MCP của dự án (+ trang backlog nếu đang ở tab Backlog)
+        const scope: BacklogScope = { projectId: id, basePath: `/projects/${encodeURIComponent(id)}`, fixedParams: { section: 'backlog' } };
+        const [data, pt] = await Promise.all([
+          section === 'backlog' ? fetchBacklog(deps, req, dbPromise, scope) : dbPromise.then((db) => ({ db, bl: null })),
+          deps.loadProjectTokens(req, id),
+        ]);
+        return { ...data, pt };
+      },
+      (req, d) => withProjectTokens(projectWorkspaceModel(req, d.db, d.bl), d.pt)
     )
   );
-  app.get('/teams', page('teams', 'teams', 'Team xử lý', deps.loadData, teamsModel));
-  app.get('/requirements', page('requirements', 'requirements', 'Tài liệu PTYC', deps.loadData, (req, db) => documentsModel(req, db)));
-  app.get('/payments', page('payments', 'payments', 'Thanh toán', deps.loadData, paymentsModel));
-  app.get('/people', page('people', 'people', 'Nhân sự', deps.loadData, peopleModel));
+  app.get('/teams', page('teams', 'teams', 'Team xử lý', (req) => deps.loadData(req, ['teams', 'stats']), teamsModel));
+  app.get('/requirements', page('requirements', 'requirements', 'Tài liệu PTYC', (req) => deps.loadData(req, ['projects', 'documents']), (req, db) => documentsModel(req, db)));
+  app.get('/payments', page('payments', 'payments', 'Thanh toán', (req) => deps.loadData(req, ['projects', 'paymentRounds']), paymentsModel));
+  app.get('/people', page('people', 'people', 'Nhân sự', (req) => deps.loadData(req, ['projects', 'teams', 'members', 'stats']), peopleModel));
   app.get(
     '/users',
     page(
       'users',
       'users',
       'Người dùng',
-      async (req) => ({ data: await deps.loadData(req), users: await deps.loadUsers(req) }),
+      async (req) => {
+        const [data, users] = await Promise.all([deps.loadData(req, ['teams']), deps.loadUsers(req)]);
+        return { data, users };
+      },
       (req, d) => usersModel(req, d.data, d.users)
     )
   );

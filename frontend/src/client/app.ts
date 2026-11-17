@@ -14,6 +14,7 @@ import { initGlobalErrors } from './errors.js';
 import { initDocuments } from './documents.js';
 import { initFeedbackForm } from './feedback-form.js';
 import { initMcp } from './mcp.js';
+import { initNavProgress } from './nav-progress.js';
 import { initProfile } from './profile.js';
 import { initProjectTokens } from './project-tokens.js';
 import { initPaymentRounds } from './payment-rounds.js';
@@ -22,6 +23,7 @@ import { initUsers } from './users.js';
 
 // Thứ tự quan trọng: crud đăng ký form dự án/team trước, form backlog và người dùng đăng ký sau
 initGlobalErrors(); // đầu tiên: để lỗi ở các init phía sau cũng được bắt
+initNavProgress();
 initDialog();
 initUi();
 initCrud();

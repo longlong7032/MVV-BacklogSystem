@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { ROOT_DIR } from './lib/paths.js';
-import { HttpError, route } from './lib/http.js';
+import { HttpError, route, uuidParam } from './lib/http.js';
 import { blobMode, readFile } from './lib/blobs.js';
 import { MAX_REQUEST_BYTES } from './lib/upload.js';
 import { q1, tx, txMiddleware } from './db/pool.js';
@@ -24,7 +24,7 @@ import type { Backend } from './mcp/server.js';
 import { activityRouter, listActivity } from './modules/activity.js';
 import { teamsRouter, listTeams } from './modules/teams.js';
 import { projectsRouter, listProjects } from './modules/projects.js';
-import { feedbacksRouter, listFeedbacks, setFeedbackStatus, assignFeedbackTeam } from './modules/feedbacks.js';
+import { feedbacksRouter, getBacklogStats, listFeedbacks, setFeedbackStatus, assignFeedbackTeam } from './modules/feedbacks.js';
 import { paymentsRouter, listPayments } from './modules/payments.js';
 import { documentsRouter, listDocuments } from './modules/documents.js';
 import { projectTokensRouter, findProjectToken, touchProjectToken } from './modules/project-tokens.js';
@@ -96,14 +96,28 @@ const mcpInfo = (): McpInfo => ({
 
 const api = express.Router();
 api.use(txMiddleware); // POST/PUT/PATCH/DELETE: một transaction / request
-// Gộp mọi dữ liệu mà các trang cần vào MỘT request (serverless: 1 lần gọi thay vì 7 lần, mỗi lần có thể cold start)
+// Gộp dữ liệu mà một trang cần vào MỘT request (serverless: 1 lần gọi thay vì nhiều lần, mỗi lần có thể cold start).
+//   ?parts=projects,teams,feedbacks,...  chỉ chạy truy vấn của các phần được yêu cầu (bỏ trống = tất cả)
+//   ?project=<idPublic>                  giới hạn feedbacks / activity / paymentRounds / documents theo một dự án
+const BOOTSTRAP_LOADERS = {
+  projects: () => listProjects(),
+  teams: () => listTeams(),
+  members: () => listProjectMembers(),
+  feedbacks: (project: string) => listFeedbacks(project),
+  activity: (project: string) => listActivity(project),
+  paymentRounds: (project: string) => listPayments(project),
+  documents: (project: string) => listDocuments(project),
+  stats: () => getBacklogStats(),
+} as const;
 api.get(
   '/bootstrap',
   route(async (req, res) => {
-    const [projects, teams, feedbacks, activity, paymentRounds, members, documents] = await Promise.all([
-      listProjects(), listTeams(), listFeedbacks(), listActivity(), listPayments(), listProjectMembers(), listDocuments(),
-    ]);
-    res.json({ projects, teams, feedbacks, activity, paymentRounds, members, documents });
+    const asked = String(req.query.parts || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const keys = (asked.length ? asked : Object.keys(BOOTSTRAP_LOADERS)).filter((k): k is keyof typeof BOOTSTRAP_LOADERS => k in BOOTSTRAP_LOADERS);
+    const project = uuidParam(req.query.project);
+    const out: Record<string, unknown> = { projects: [], teams: [], feedbacks: [], activity: [], paymentRounds: [], members: [], documents: [], stats: { groups: [], nextStt: {}, types: [] } };
+    await Promise.all(keys.map(async (k) => void (out[k] = await BOOTSTRAP_LOADERS[k](project))));
+    res.json(out);
   })
 );
 api.get('/mcp-info', (req, res) => void res.json(mcpInfo()));

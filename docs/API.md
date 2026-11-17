@@ -93,6 +93,8 @@ Tất cả dưới `/api`. Body JSON trừ khi ghi *multipart*. `:id` = `idPubli
 | PATCH | `/feedbacks/:id/status` | `{ status }` |
 | PATCH | `/feedbacks/:id/team` | `{ team_id }` |
 | DELETE | `/feedbacks/:id` | |
+| GET | `/backlog` | Lọc / sắp xếp / phân trang **trong SQL**. `?project&team&type&status&q&sort=project\|newest\|updated&page&pageSize` (≤100, mặc định 20) → `{ items: Feedback[], total, counts: {todo,doing,done}, page, pages, pageSize }`. `counts` áp mọi bộ lọc trừ `status`. `team` / `type` = `none` là "chưa có". Thêm `mode=board` → Kanban `{ columns: {todo\|doing\|done: {total, items}}, counts, limit }` (mỗi cột tối đa 50 thẻ) |
+| GET | `/bootstrap` | Dữ liệu gộp cho giao diện. `?parts=projects,teams,members,feedbacks,activity,paymentRounds,documents,stats` chỉ chạy phần được xin (bỏ trống = tất cả), `?project=<idPublic>` giới hạn feedbacks / activity / paymentRounds / documents theo dự án. `stats = { groups: {projectId, teamId, assigneeId, status, count}[], nextStt: {projectId: n}, types: string[] }` (thống kê gộp bằng `GROUP BY`, thay cho việc tải mọi backlog chỉ để đếm) |
 | GET | `/export` | `?project&team&type&status&q` → file `.xlsx` |
 
 `Feedback = { idPublic, createdAt, updatedAt, projectId, teamId, assigneeId, stt, title, type, note, status, location: {url, image}, bug: {text, images[]}, expected: {text, images[]}, har: {url, name, size} | null, completedAt, updatedBy }`
@@ -124,7 +126,7 @@ Tất cả dưới `/api`. Body JSON trừ khi ghi *multipart*. `:id` = `idPubli
 |---|---|---|
 | GET | `/activity` | `?project=` — 300 dòng mới nhất |
 | GET | `/project-members` | nhân sự đang hoạt động `{ idPublic, name, teamId, role }` (không có email) |
-| POST | `/admin/login` | `{ email, password }` hoặc `{ token }` → cookie `fb_admin` (HttpOnly, 8 giờ) |
+| POST | `/admin/login` | `{ email, password }` → cookie `fb_admin` (HttpOnly, 8 giờ) |
 | DELETE | `/admin/session` | đăng xuất |
 | GET / POST | `/users` | *(admin)* danh sách / tạo (trả token một lần) |
 | PUT / DELETE | `/users/:id` | *(admin)* sửa / xóa mềm — không cho mất admin hoạt động cuối cùng |

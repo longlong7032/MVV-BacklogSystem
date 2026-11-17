@@ -1,7 +1,7 @@
 /**
  * Người dùng, token cá nhân (MCP), đăng nhập quản trị (phiên), nhật ký quản trị.
  *
- *   POST   /api/admin/login          { email, password } | { token }  -> đặt cookie phiên fb_admin
+ *   POST   /api/admin/login          { email, password }  -> đặt cookie phiên fb_admin
  *   DELETE /api/admin/session        đăng xuất (xóa mềm phiên)
  *   GET    /api/admin/me             (admin) hồ sơ của chính mình
  *   PUT    /api/admin/me             (admin) đổi tên hiển thị
@@ -288,21 +288,15 @@ usersRouter.post(
       throw new HttpError(429, `Quá nhiều yêu cầu, thử lại sau ${wait}s.`);
     }
     const body = req.body || {};
-    const personalToken = typeof body.token === 'string' ? body.token.trim().slice(0, 256) : '';
-    let user: Actor | null = null;
-    if (personalToken) {
-      user = await findUserByToken(personalToken);
-    } else {
-      const email = str(body.email).toLowerCase().slice(0, 200);
-      const password = typeof body.password === 'string' ? body.password.slice(0, 200) : '';
-      const row = await q1("SELECT * FROM users WHERE email = $1 AND password_hash <> '' AND deleted_at IS NULL", [email]);
-      // luôn băm mật khẩu (kể cả khi email không tồn tại) để thời gian xử lý không lộ thông tin
-      const ok = verifyPassword(password, row ? row.password_hash : DUMMY_PASSWORD_HASH);
-      user = ok && row ? toActor(row) : null;
-    }
+    const email = str(body.email).toLowerCase().slice(0, 200);
+    const password = typeof body.password === 'string' ? body.password.slice(0, 200) : '';
+    const row = await q1("SELECT * FROM users WHERE email = $1 AND password_hash <> '' AND deleted_at IS NULL", [email]);
+    // luôn băm mật khẩu (kể cả khi email không tồn tại) để thời gian xử lý không lộ thông tin
+    const ok = verifyPassword(password, row ? row.password_hash : DUMMY_PASSWORD_HASH);
+    const user: Actor | null = ok && row ? toActor(row) : null;
     if (!user) {
       adminBadAuth.hit(ip);
-      throw new HttpError(401, personalToken ? 'Token không đúng.' : 'Email hoặc mật khẩu không đúng.', 'admin-auth');
+      throw new HttpError(401, 'Email hoặc mật khẩu không đúng.', 'admin-auth');
     }
     if (!user.active || user.role !== 'admin') throw new HttpError(403, 'Tài khoản này không có quyền quản trị.', 'admin-forbidden');
     const token = SESSION_PREFIX + crypto.randomBytes(32).toString('base64url');

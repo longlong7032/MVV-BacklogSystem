@@ -100,6 +100,31 @@ export const countByStatus = (list: Feedback[]): Record<FeedbackStatus, number> 
   return counts;
 };
 
+/** Một nhóm thống kê backlog do backend gộp sẵn (GROUP BY dự án / team / người xử lý / trạng thái). */
+export interface StatGroup {
+  projectId: string;
+  teamId: string;
+  assigneeId: string;
+  status: FeedbackStatus;
+  count: number;
+}
+
+/** Thống kê backlog toàn hệ thống (thay cho việc tải mọi backlog chỉ để đếm). */
+export interface Stats {
+  groups: StatGroup[];
+  /** STT kế tiếp của từng dự án (chỉ dự án đã có backlog). */
+  nextStt: Record<string, number>;
+  /** Các "loại" đang được dùng. */
+  types: string[];
+}
+
+/** Cộng số backlog theo trạng thái của các nhóm thỏa `pred` (mặc định: tất cả). */
+export const tally = (stats: Stats, pred: (g: StatGroup) => boolean = () => true): { counts: Record<FeedbackStatus, number>; total: number } => {
+  const counts: Record<FeedbackStatus, number> = { todo: 0, doing: 0, done: 0 };
+  for (const g of stats.groups) if (pred(g)) counts[g.status] += g.count;
+  return { counts, total: counts.todo + counts.doing + counts.done };
+};
+
 /** Dữ liệu cho partial `progress` (thanh tiến độ % hoàn thành kèm số lượng). */
 export const makeProgress = (counts: Record<FeedbackStatus, number>, total: number, emptyText = 'Chưa có backlog') => ({
   empty: !total,

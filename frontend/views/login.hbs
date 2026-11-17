@@ -8,9 +8,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.24/dist/full.min.css" rel="stylesheet" type="text/css">
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="/public/css/app.css" rel="stylesheet">
   <script>
-    tailwind.config = { theme: { extend: { fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui'] } } } };
     (function () {
       var saved = null;
       try { saved = localStorage.getItem('feedback-theme'); } catch (e) {}
@@ -41,7 +40,7 @@
 {{else}}
     <div class="card border border-base-content/10 bg-base-100 shadow-sm"><div class="card-body">
       <h1 class="text-lg font-semibold">Đăng nhập</h1>
-      <p class="mt-1 text-sm opacity-70">Đăng nhập quản trị viên để quản lý người dùng và token.</p>
+      <p class="mt-1 text-sm opacity-70">Đăng nhập quản trị viên để quản lý người dùng.</p>
       <form id="adminKeyForm" data-login data-next="{{next}}" class="mt-4 space-y-3" novalidate>
         <div id="loginPasswordFields" class="space-y-3">
           <input id="adminEmail" name="email" type="email" autocomplete="username" inputmode="email" placeholder="Email quản trị" autofocus
@@ -49,13 +48,8 @@
           <input id="adminPassword" name="password" type="password" autocomplete="current-password" placeholder="Mật khẩu"
             class="input input-bordered w-full">
         </div>
-        <div id="loginTokenFields" class="hidden">
-          <input id="adminKey" name="token" type="password" autocomplete="off" placeholder="Token quản trị (fbk_…)"
-            class="input input-bordered w-full">
-        </div>
         <p data-error role="alert" class="alert alert-error hidden py-2 text-sm"></p>
         <button type="submit" data-submit class="btn btn-primary btn-block">Đăng nhập</button>
-        <button type="button" data-login-mode class="btn btn-link btn-sm btn-block">Đăng nhập bằng token cá nhân</button>
       </form>
     </div></div>
 {{/if}}

@@ -9,23 +9,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.24/dist/full.min.css" rel="stylesheet" type="text/css">
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="/public/css/app.css" rel="stylesheet">
   <script>
-    // Giao diện dùng component + theme của DaisyUI; Tailwind chỉ dùng cho bố cục.
+    // Giao diện dùng component + theme của DaisyUI; Tailwind (build sẵn: npm run build:css) chỉ dùng cho bố cục.
     // Đổi theme sáng/tối tại MỘT chỗ: hằng THEMES dưới đây (ui.ts đọc lại qua data-theme-light/-dark).
-    // Khai báo màu theme DaisyUI 4 (biến CSS --p, --b1, ...) cho Tailwind CDN để các biến thể như
-    // hover:bg-base-200, aria-pressed:bg-primary, bg-primary/10 được sinh ra và tự đổi theo theme sáng/tối.
-    var dc = function (v) { return 'oklch(var(--' + v + ') / <alpha-value>)'; };
-    tailwind.config = { theme: { extend: {
-      fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui'] },
-      colors: {
-        primary: { DEFAULT: dc('p'), content: dc('pc') }, secondary: { DEFAULT: dc('s'), content: dc('sc') },
-        accent: { DEFAULT: dc('a'), content: dc('ac') }, neutral: { DEFAULT: dc('n'), content: dc('nc') },
-        'base-100': dc('b1'), 'base-200': dc('b2'), 'base-300': dc('b3'), 'base-content': dc('bc'),
-        info: { DEFAULT: dc('in'), content: dc('inc') }, success: { DEFAULT: dc('su'), content: dc('suc') },
-        warning: { DEFAULT: dc('wa'), content: dc('wac') }, error: { DEFAULT: dc('er'), content: dc('erc') },
-      },
-    } } };
     (function () {
       var THEMES = { light: 'corporate', dark: 'business' };
       var root = document.documentElement;

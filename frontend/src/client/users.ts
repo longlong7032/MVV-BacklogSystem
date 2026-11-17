@@ -98,33 +98,13 @@ export function initUsers(): void {
 export function initLogin(): void {
   const form = maybe<HTMLFormElement>('[data-login]');
   if (form) {
-    const passwordFields = $('#loginPasswordFields');
-    const tokenFields = $('#loginTokenFields');
-    const modeBtn = $('[data-login-mode]', form);
     const errorBox = $('[data-error]', form);
     const submit = $<HTMLButtonElement>('[data-submit]', form);
-    let mode: 'password' | 'token' = 'password';
-
-    // Chuyển giữa đăng nhập bằng mật khẩu và bằng token cá nhân
-    modeBtn.addEventListener('click', () => {
-      mode = mode === 'password' ? 'token' : 'password';
-      passwordFields.classList.toggle('hidden', mode !== 'password');
-      tokenFields.classList.toggle('hidden', mode !== 'token');
-      modeBtn.textContent = mode === 'password' ? 'Đăng nhập bằng token cá nhân' : 'Đăng nhập bằng email và mật khẩu';
-      setError(errorBox, '');
-      $<Field>(mode === 'password' ? '#adminEmail' : '#adminKey').focus();
-    });
-
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       setError(errorBox, '');
-      const body =
-        mode === 'token'
-          ? { token: $<Field>('#adminKey').value.trim() }
-          : { email: $<Field>('#adminEmail').value.trim(), password: $<Field>('#adminPassword').value };
-      if (mode === 'token' ? !('token' in body && body.token) : !('email' in body && body.email && body.password)) {
-        return setError(errorBox, mode === 'token' ? 'Vui lòng dán token quản trị.' : 'Vui lòng nhập email và mật khẩu.');
-      }
+      const body = { email: $<Field>('#adminEmail').value.trim(), password: $<Field>('#adminPassword').value };
+      if (!body.email || !body.password) return setError(errorBox, 'Vui lòng nhập email và mật khẩu.');
       submit.disabled = true;
       try {
         await api('/api/admin/login', jsonBody('POST', body)); // server đặt cookie phiên

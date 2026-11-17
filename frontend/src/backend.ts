@@ -11,6 +11,7 @@
 import type { Request } from 'express';
 import type { ActivityEntry, AuditEntry, Feedback, McpInfo, PaymentRound, Profile, Project, ProjectDocument, ProjectMember, PublicUser, Team } from './types.js';
 import type { Data, UsersData } from './pages/index.js';
+import type { FeedbackStatus } from './types.js';
 
 /** Địa chỉ backend mặc định khi chạy local (khớp PORT mặc định của backend). */
 const LOCAL_BACKEND_URL = 'http://localhost:3000';
@@ -109,8 +110,50 @@ export async function loadPublicBacklog(req: Request): Promise<{ project: string
   return r.body;
 }
 
-export async function loadData(req: Request): Promise<Data> {
-  const r = await backendGet<Data>(req, '/api/bootstrap');
+/** Các phần dữ liệu của `/api/bootstrap`; mỗi trang chỉ xin phần nó dùng để backend bớt truy vấn. */
+export type DataPart = 'projects' | 'teams' | 'members' | 'feedbacks' | 'activity' | 'paymentRounds' | 'documents' | 'stats';
+
+export async function loadData(req: Request, parts: DataPart[] = [], project = ''): Promise<Data> {
+  const params = new URLSearchParams();
+  if (parts.length) params.set('parts', parts.join(','));
+  if (project) params.set('project', project);
+  const r = await backendGet<Data>(req, `/api/bootstrap${params.size ? `?${params}` : ''}`);
+  if (!r.ok) throw new Error(`backend trả HTTP ${r.status}: ${r.body.error ?? ''}`);
+  return r.body;
+}
+
+/** Tham số lọc / sắp xếp / phân trang gửi tới `/api/backlog`. */
+export interface BacklogQuery {
+  project?: string;
+  team?: string;
+  type?: string;
+  status?: string;
+  q?: string;
+  sort?: string;
+  page?: number;
+  pageSize?: number;
+  /** 'board' = Kanban: trả các cột (mỗi cột tối đa `limit` thẻ) thay vì một trang. */
+  mode?: 'board' | '';
+}
+
+/** Kết quả `/api/backlog`: chế độ bảng có `items` + phân trang; chế độ Kanban có `columns`. */
+export interface BacklogData {
+  /** Số mục theo trạng thái (đã áp mọi bộ lọc trừ trạng thái). */
+  counts: Record<FeedbackStatus, number>;
+  items: Feedback[];
+  total: number;
+  page: number;
+  pages: number;
+  pageSize: number;
+  columns?: Record<FeedbackStatus, { total: number; items: Feedback[] }>;
+  limit?: number;
+}
+
+/** Lấy một trang backlog đã lọc / sắp xếp / phân trang trong SQL. */
+export async function loadBacklog(req: Request, query: BacklogQuery): Promise<BacklogData> {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== '' && v !== null) params.set(k, String(v));
+  const r = await backendGet<BacklogData>(req, `/api/backlog${params.size ? `?${params}` : ''}`);
   if (!r.ok) throw new Error(`backend trả HTTP ${r.status}: ${r.body.error ?? ''}`);
   return r.body;
 }

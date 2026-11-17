@@ -49,7 +49,7 @@
         <span class="h-2.5 w-2.5 rounded-full {{dot}}" aria-hidden="true"></span>{{label}}
         <span class="badge badge-ghost badge-sm">{{count}}</span>
       </h3>
-      <div class="space-y-3">{{#each cards}}{{> board_card}}{{else}}<p class="rounded-box border border-dashed border-base-content/20 py-8 text-center text-sm text-base-content/50">Thả backlog vào đây</p>{{/each}}</div>
+      <div class="space-y-3">{{#each cards}}{{> board_card}}{{else}}<p class="rounded-box border border-dashed border-base-content/20 py-8 text-center text-sm text-base-content/50">Thả backlog vào đây</p>{{/each}}{{#if more}}<p class="px-1 text-center text-xs text-base-content/60">Còn {{more}} backlog nữa — thu hẹp bộ lọc hoặc chuyển sang chế độ Bảng để xem.</p>{{/if}}</div>
     </section>
     {{/each}}
   </div>

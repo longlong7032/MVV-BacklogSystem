@@ -131,6 +131,9 @@
       <p class="text-sm text-base-content/70">Bấm vào tên backlog để xem đầy đủ, đổi trạng thái hoặc giao việc.</p>
       <div class="flex flex-wrap gap-2">
         <a href="{{backlog.exportHref}}" class="btn btn-ghost btn-sm">Tải Excel</a>
+        {{#if backlog.publicHref}}
+        <a href="{{backlog.publicHref}}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" title="Mở trang xem công khai (ẩn ID và file HAR) để gửi cho người vãng lai">Trang xem công khai</a>
+        {{/if}}
         <button type="button" data-open-form="feedback" class="btn btn-primary btn-sm"><span aria-hidden="true">+</span> Thêm backlog</button>
       </div>
     </div>
